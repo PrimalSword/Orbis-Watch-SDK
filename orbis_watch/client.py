@@ -12,6 +12,7 @@ from .protocol.parser import PacketStreamParser
 
 
 _RETRYABLE_ERRORS = (BleakError, TimeoutError, OSError)
+_REQUEST_RETRYABLE_ERRORS = (asyncio.TimeoutError,) + _RETRYABLE_ERRORS
 
 
 class OrbisWatchClient:
@@ -153,7 +154,7 @@ class OrbisWatchClient:
 
         try:
             return await asyncio.wait_for(perform_request(), timeout=timeout)
-        except (asyncio.TimeoutError, *_RETRYABLE_ERRORS):
+        except _REQUEST_RETRYABLE_ERRORS:
             await self.reconnect()
             return await asyncio.wait_for(perform_request(), timeout=timeout)
 
