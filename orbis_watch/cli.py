@@ -63,7 +63,7 @@ async def run_console(address: str) -> None:
                 if command == "features":
                     features = await watch.get_features()
                     print(f"Feature ACK: {features.acknowledged}")
-                    print(f"Bitmap: {features.hex_string}")
+                    print(f"Bitmap: {features.hex}")
                     print(f"Enabled bits: {features.enabled_bits}")
                     continue
 
