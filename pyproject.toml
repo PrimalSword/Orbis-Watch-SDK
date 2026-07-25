@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbis-watch-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Independent Python SDK and BLE protocol implementation for HryFine-compatible smartwatches."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,9 @@ authors = [
 dependencies = [
   "bleak>=0.22,<2"
 ]
+
+[project.scripts]
+orbis-watch = "orbis_watch.cli:main"
 
 [project.optional-dependencies]
 dev = [
