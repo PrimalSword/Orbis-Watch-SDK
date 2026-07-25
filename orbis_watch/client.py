@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from bleak import BleakClient
 from bleak.exc import BleakError
@@ -12,7 +15,18 @@ from .protocol.parser import PacketStreamParser
 
 
 _RETRYABLE_ERRORS = (BleakError, TimeoutError, OSError)
-_REQUEST_RETRYABLE_ERRORS = (asyncio.TimeoutError,) + _RETRYABLE_ERRORS
+
+
+@dataclass(frozen=True, slots=True)
+class TrafficEvent:
+    timestamp: str
+    direction: str
+    data: bytes
+    packet: Packet | None = None
+
+    @property
+    def hex(self) -> str:
+        return self.data.hex(" ").upper()
 
 
 class OrbisWatchClient:
@@ -30,6 +44,8 @@ class OrbisWatchClient:
         self._client = self._new_client()
         self._parser = PacketStreamParser()
         self._queues: dict[int, asyncio.Queue[Packet]] = defaultdict(asyncio.Queue)
+        self._traffic_queue: asyncio.Queue[TrafficEvent] = asyncio.Queue()
+        self._observers: set[Callable[[TrafficEvent], None]] = set()
         self._started = False
         self._connection_lock = asyncio.Lock()
 
@@ -39,6 +55,35 @@ class OrbisWatchClient:
     @property
     def is_connected(self) -> bool:
         return bool(self._client.is_connected and self._started)
+
+    def add_traffic_observer(self, observer: Callable[[TrafficEvent], None]) -> None:
+        self._observers.add(observer)
+
+    def remove_traffic_observer(self, observer: Callable[[TrafficEvent], None]) -> None:
+        self._observers.discard(observer)
+
+    def _emit(self, direction: str, data: bytes, packet: Packet | None = None) -> None:
+        event = TrafficEvent(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            direction=direction,
+            data=bytes(data),
+            packet=packet,
+        )
+        self._traffic_queue.put_nowait(event)
+        for observer in tuple(self._observers):
+            try:
+                observer(event)
+            except Exception:
+                pass
+
+    async def next_traffic(self, timeout: float | None = None) -> TrafficEvent:
+        if timeout is None:
+            return await self._traffic_queue.get()
+        return await asyncio.wait_for(self._traffic_queue.get(), timeout=timeout)
+
+    def clear_traffic(self) -> None:
+        while not self._traffic_queue.empty():
+            self._traffic_queue.get_nowait()
 
     async def _dispose_client(self) -> None:
         try:
@@ -112,25 +157,37 @@ class OrbisWatchClient:
         await self.disconnect()
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
-        for packet in self._parser.feed(data):
+        raw = bytes(data)
+        packets = self._parser.feed(raw)
+        if not packets:
+            self._emit("RX", raw)
+            return
+        for packet in packets:
             self._queues[packet.command].put_nowait(packet)
+            self._emit("RX", packet.to_bytes(), packet)
 
-    async def send(self, packet: Packet) -> None:
+    async def write_raw(self, data: bytes) -> None:
+        if not data:
+            raise ValueError("Raw frame is empty")
         await self.ensure_connected()
-
+        self._emit("TX", data)
         try:
-            await self._client.write_gatt_char(
-                NUS_WRITE_UUID,
-                packet.to_bytes(),
-                response=False,
-            )
+            await self._client.write_gatt_char(NUS_WRITE_UUID, data, response=False)
         except _RETRYABLE_ERRORS:
             await self.reconnect()
-            await self._client.write_gatt_char(
-                NUS_WRITE_UUID,
-                packet.to_bytes(),
-                response=False,
-            )
+            self._emit("TX", data)
+            await self._client.write_gatt_char(NUS_WRITE_UUID, data, response=False)
+
+    async def send(self, packet: Packet) -> None:
+        data = packet.to_bytes()
+        await self.ensure_connected()
+        self._emit("TX", data, packet)
+        try:
+            await self._client.write_gatt_char(NUS_WRITE_UUID, data, response=False)
+        except _RETRYABLE_ERRORS:
+            await self.reconnect()
+            self._emit("TX", data, packet)
+            await self._client.write_gatt_char(NUS_WRITE_UUID, data, response=False)
 
     async def request(
         self,
@@ -154,7 +211,7 @@ class OrbisWatchClient:
 
         try:
             return await asyncio.wait_for(perform_request(), timeout=timeout)
-        except _REQUEST_RETRYABLE_ERRORS:
+        except (asyncio.TimeoutError, *_RETRYABLE_ERRORS):
             await self.reconnect()
             return await asyncio.wait_for(perform_request(), timeout=timeout)
 
