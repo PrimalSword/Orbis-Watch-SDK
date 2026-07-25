@@ -159,12 +159,10 @@ class OrbisWatchClient:
     def _on_notify(self, _sender: object, data: bytearray) -> None:
         raw = bytes(data)
         packets = self._parser.feed(raw)
-        if not packets:
-            self._emit("RX", raw)
-            return
-        for packet in packets:
-            self._queues[packet.command].put_nowait(packet)
-            self._emit("RX", packet.to_bytes(), packet)
+        packet = packets[0] if len(packets) == 1 else None
+        self._emit("RX", raw, packet)
+        for parsed in packets:
+            self._queues[parsed.command].put_nowait(parsed)
 
     async def write_raw(self, data: bytes) -> None:
         if not data:
@@ -195,6 +193,7 @@ class OrbisWatchClient:
         *,
         timeout: float = 10.0,
         accept_ack: bool = False,
+        retry_on_timeout: bool = True,
     ) -> Packet:
         queue = self._queues[packet.command]
 
@@ -211,7 +210,12 @@ class OrbisWatchClient:
 
         try:
             return await asyncio.wait_for(perform_request(), timeout=timeout)
-        except (asyncio.TimeoutError, *_RETRYABLE_ERRORS):
+        except asyncio.TimeoutError:
+            if not retry_on_timeout:
+                raise
+            await self.reconnect()
+            return await asyncio.wait_for(perform_request(), timeout=timeout)
+        except _RETRYABLE_ERRORS:
             await self.reconnect()
             return await asyncio.wait_for(perform_request(), timeout=timeout)
 
