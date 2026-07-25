@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from .client import OrbisWatchClient
+import asyncio
+from dataclasses import dataclass
+from time import perf_counter
+
+from .client import OrbisWatchClient, TrafficEvent
 from .constants import BATTERY_LEVEL_UUID, FEATURE_BITMAP_UUID, CommandID
 from .models.device_info import DeviceInfo
 from .models.feature_set import FeatureSet
 from .protocol.packet import Packet
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryResult:
+    command: int
+    status: str
+    elapsed_ms: float
+    response: bytes = b""
+    error: str = ""
 
 
 class Watch:
@@ -43,7 +56,6 @@ class Watch:
         return value[0]
 
     async def request_features(self) -> bool:
-        """Ask the watch to acknowledge feature discovery."""
         response = await self._client.request(
             Packet.build(CommandID.GET_FEATURE),
             timeout=10.0,
@@ -52,11 +64,53 @@ class Watch:
         return response.is_ack and response.ack_status == 0x01
 
     async def get_features(self, *, request_ack: bool = True) -> FeatureSet:
-        """Read the complete feature bitmap exposed by the watch.
-
-        GET_FEATURE only returns an acknowledgement on the validated G28. The
-        actual capabilities bitmap is read from GATT characteristic 0x2A28.
-        """
         acknowledged = await self.request_features() if request_ack else False
         bitmap = await self._client.read_gatt(FEATURE_BITMAP_UUID)
         return FeatureSet.from_bytes(bitmap, acknowledged=acknowledged)
+
+    async def write_raw(self, data: bytes) -> None:
+        await self._client.write_raw(data)
+
+    async def next_traffic(self, timeout: float | None = None) -> TrafficEvent:
+        return await self._client.next_traffic(timeout)
+
+    def clear_traffic(self) -> None:
+        self._client.clear_traffic()
+
+    def add_traffic_observer(self, observer) -> None:
+        self._client.add_traffic_observer(observer)
+
+    def remove_traffic_observer(self, observer) -> None:
+        self._client.remove_traffic_observer(observer)
+
+    async def probe_command(self, command: int, timeout: float = 1.5) -> DiscoveryResult:
+        started = perf_counter()
+        try:
+            response = await self._client.request(
+                Packet.build(command),
+                timeout=timeout,
+                accept_ack=True,
+            )
+            elapsed = (perf_counter() - started) * 1000
+            status = "ACK" if response.is_ack else "DATA"
+            if response.is_ack and response.ack_status not in (None, 0x01):
+                status = f"ACK_STATUS_{response.ack_status:02X}"
+            return DiscoveryResult(
+                command=command,
+                status=status,
+                elapsed_ms=elapsed,
+                response=response.to_bytes(),
+            )
+        except asyncio.TimeoutError:
+            return DiscoveryResult(
+                command=command,
+                status="TIMEOUT",
+                elapsed_ms=(perf_counter() - started) * 1000,
+            )
+        except Exception as exc:
+            return DiscoveryResult(
+                command=command,
+                status="ERROR",
+                elapsed_ms=(perf_counter() - started) * 1000,
+                error=f"{type(exc).__name__}: {exc}",
+            )
