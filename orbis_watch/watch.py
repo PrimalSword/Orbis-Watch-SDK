@@ -90,6 +90,7 @@ class Watch:
                 Packet.build(command),
                 timeout=timeout,
                 accept_ack=True,
+                retry_on_timeout=False,
             )
             elapsed = (perf_counter() - started) * 1000
             status = "ACK" if response.is_ack else "DATA"
