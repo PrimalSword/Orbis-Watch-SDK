@@ -11,6 +11,9 @@ from .protocol.packet import Packet
 from .protocol.parser import PacketStreamParser
 
 
+_RETRYABLE_ERRORS = (BleakError, TimeoutError, OSError)
+
+
 class OrbisWatchClient:
     def __init__(
         self,
@@ -27,21 +30,38 @@ class OrbisWatchClient:
         self._parser = PacketStreamParser()
         self._queues: dict[int, asyncio.Queue[Packet]] = defaultdict(asyncio.Queue)
         self._started = False
+        self._connection_lock = asyncio.Lock()
 
     def _new_client(self) -> BleakClient:
         return BleakClient(self.address, timeout=self.timeout)
 
     @property
     def is_connected(self) -> bool:
-        return self._client.is_connected
+        return bool(self._client.is_connected and self._started)
 
-    async def connect(self) -> None:
-        if self._client.is_connected:
+    async def _dispose_client(self) -> None:
+        try:
+            if self._started and self._client.is_connected:
+                await self._client.stop_notify(NUS_NOTIFY_UUID)
+        except Exception:
+            pass
+
+        try:
+            if self._client.is_connected:
+                await self._client.disconnect()
+        except Exception:
+            pass
+
+        self._started = False
+
+    async def _connect_locked(self) -> None:
+        if self.is_connected:
             return
 
         last_error: Exception | None = None
 
         for attempt in range(1, self.connect_attempts + 1):
+            await self._dispose_client()
             self._client = self._new_client()
 
             try:
@@ -49,15 +69,9 @@ class OrbisWatchClient:
                 await self._client.start_notify(NUS_NOTIFY_UUID, self._on_notify)
                 self._started = True
                 return
-            except (BleakError, TimeoutError, OSError) as exc:
+            except _RETRYABLE_ERRORS as exc:
                 last_error = exc
-                self._started = False
-
-                try:
-                    if self._client.is_connected:
-                        await self._client.disconnect()
-                except Exception:
-                    pass
+                await self._dispose_client()
 
                 if attempt < self.connect_attempts:
                     await asyncio.sleep(self.retry_delay)
@@ -68,15 +82,26 @@ class OrbisWatchClient:
             "and disconnected from HryFine or other Bluetooth applications."
         ) from last_error
 
+    async def connect(self) -> None:
+        async with self._connection_lock:
+            await self._connect_locked()
+
+    async def ensure_connected(self) -> None:
+        if self.is_connected:
+            return
+
+        async with self._connection_lock:
+            if not self.is_connected:
+                await self._connect_locked()
+
+    async def reconnect(self) -> None:
+        async with self._connection_lock:
+            await self._dispose_client()
+            await self._connect_locked()
+
     async def disconnect(self) -> None:
-        if self._started and self._client.is_connected:
-            try:
-                await self._client.stop_notify(NUS_NOTIFY_UUID)
-            except BleakError:
-                pass
-        self._started = False
-        if self._client.is_connected:
-            await self._client.disconnect()
+        async with self._connection_lock:
+            await self._dispose_client()
 
     async def __aenter__(self) -> "OrbisWatchClient":
         await self.connect()
@@ -90,14 +115,21 @@ class OrbisWatchClient:
             self._queues[packet.command].put_nowait(packet)
 
     async def send(self, packet: Packet) -> None:
-        if not self._client.is_connected:
-            raise RuntimeError("Watch is not connected")
+        await self.ensure_connected()
 
-        await self._client.write_gatt_char(
-            NUS_WRITE_UUID,
-            packet.to_bytes(),
-            response=False,
-        )
+        try:
+            await self._client.write_gatt_char(
+                NUS_WRITE_UUID,
+                packet.to_bytes(),
+                response=False,
+            )
+        except _RETRYABLE_ERRORS:
+            await self.reconnect()
+            await self._client.write_gatt_char(
+                NUS_WRITE_UUID,
+                packet.to_bytes(),
+                response=False,
+            )
 
     async def request(
         self,
@@ -108,20 +140,28 @@ class OrbisWatchClient:
     ) -> Packet:
         queue = self._queues[packet.command]
 
-        while not queue.empty():
-            queue.get_nowait()
+        async def perform_request() -> Packet:
+            while not queue.empty():
+                queue.get_nowait()
 
-        await self.send(packet)
+            await self.send(packet)
 
-        async def wait_for_matching() -> Packet:
             while True:
                 response = await queue.get()
                 if accept_ack or not response.is_ack:
                     return response
 
-        return await asyncio.wait_for(wait_for_matching(), timeout=timeout)
+        try:
+            return await asyncio.wait_for(perform_request(), timeout=timeout)
+        except (asyncio.TimeoutError, *_RETRYABLE_ERRORS):
+            await self.reconnect()
+            return await asyncio.wait_for(perform_request(), timeout=timeout)
 
     async def read_gatt(self, uuid: str) -> bytes:
-        if not self._client.is_connected:
-            raise RuntimeError("Watch is not connected")
-        return bytes(await self._client.read_gatt_char(uuid))
+        await self.ensure_connected()
+
+        try:
+            return bytes(await self._client.read_gatt_char(uuid))
+        except _RETRYABLE_ERRORS:
+            await self.reconnect()
+            return bytes(await self._client.read_gatt_char(uuid))
