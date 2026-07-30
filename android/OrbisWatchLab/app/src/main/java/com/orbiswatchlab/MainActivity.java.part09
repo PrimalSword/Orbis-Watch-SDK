@@ -1,0 +1,148 @@
+        if (firmwareParts.isEmpty()) return "Carregue um pacote";
+        if (firmwareParts.size() * 9 > 255) return "Tabela de partições excede 255 bytes";
+        for (FirmwarePart part : firmwareParts) {
+            if (part.mapping < 0 || part.mapping > 255) return "part_id ausente ou inválido em " + part.name;
+            if (part.address < 0 || part.address > 0xFFFFFFFFL) return "endereço ausente ou inválido em " + part.name;
+            if (!tableOnly && (part.data == null || part.data.length == 0)) return "BIN não baixado/carregado: " + part.name;
+            if (part.length <= 0 && part.data != null) part.length = part.data.length;
+        }
+        return null;
+    }
+
+    private void stopTransfer(String reason) {
+        if (transferMode != TransferMode.NONE || experimentRunning) append("TRANSFER STOP: " + reason);
+        transferMode = TransferMode.NONE;
+        transferStage = TransferStage.IDLE;
+        experimentRunning = false;
+        otaTxQueue.clear();
+        otaBatchCompletion = null;
+        otaWriteToken++;
+        otaWriteBusy = false;
+        renderTransferStatus();
+    }
+
+    private void emergencyStop() {
+        emergencyStopped = true;
+        riskArmed = false;
+        cancelPendingTasks();
+        stopScan();
+        otaTxQueue.clear();
+        notifyQueue.clear();
+        stopTransfer("PARADA DE EMERGÊNCIA");
+        append("!!! EMERGÊNCIA ACIONADA: TX bloqueado, filas limpas, GATT encerrado !!!");
+        disconnectGattOnly();
+        setStatus("PARADA DE EMERGÊNCIA ATIVA");
+        toast("Processo interrompido e relógio desconectado");
+    }
+
+    private void rearmLaboratory() {
+        new AlertDialog.Builder(this)
+                .setTitle("Rearmar?")
+                .setMessage("Libera conexão e novos testes. O modo de risco continuará desarmado.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Rearmar", (d, w) -> {
+                    emergencyStopped = false;
+                    riskArmed = false;
+                    experimentRunning = false;
+                    setStatus("Rearmado — procure e conecte o G28");
+                    append("Laboratório rearmado");
+                }).show();
+    }
+
+    private void disconnect() {
+        cancelPendingTasks();
+        stopTransfer("Desconectado pelo operador");
+        stopScan();
+        disconnectGattOnly();
+        setStatus(emergencyStopped ? "PARADA DE EMERGÊNCIA ATIVA" : "Desconectado");
+    }
+
+    private void disconnectGattOnly() {
+        BluetoothGatt current = gatt;
+        gatt = null;
+        clearCharacteristics();
+        if (current != null && hasConnectPermission()) {
+            try { current.disconnect(); } catch (Exception ignored) { }
+            try { current.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    private void clearCharacteristics() {
+        nusWrite = null;
+        nusNotify = null;
+        otaWrite = null;
+        otaNotify = null;
+        batteryCharacteristic = null;
+        featureCharacteristic = null;
+        otaNotificationsReady = false;
+    }
+
+    private void renderOtaStatus() {
+        runOnUiThread(() -> {
+            String value = "OTA service: " + (gatt != null && gatt.getService(OTA_SERVICE_5610_UUID) != null)
+                    + "\nwrite: " + uuidOf(otaWrite)
+                    + "\nnotify: " + uuidOf(otaNotify)
+                    + "\nnotify ativo: " + otaNotificationsReady
+                    + "\nMTU: " + negotiatedMtu + " / payload: " + otaPayloadSize()
+                    + "\nprotocolo: " + emptyAsDash(otaVersion)
+                    + "\nprojeto: " + emptyAsDash(otaProject)
+                    + "\nunique_code: " + emptyAsDash(otaUniqueCode)
+                    + "\nparityStyle: " + parityStyle;
+            otaView.setText(value);
+        });
+    }
+
+    private void renderPackage() {
+        runOnUiThread(() -> {
+            if (firmwareParts.isEmpty()) { packageView.setText("Nenhum pacote carregado."); return; }
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < firmwareParts.size(); i++) {
+                FirmwarePart p = firmwareParts.get(i);
+                out.append(i + 1).append(". ").append(p.name)
+                        .append("\n   part_id=").append(p.mapping)
+                        .append(" addr=0x").append(p.address < 0 ? "?" : Long.toHexString(p.address).toUpperCase(Locale.US))
+                        .append(" declared=").append(p.length)
+                        .append(" loaded=").append(p.data == null ? 0 : p.data.length)
+                        .append("\n   url=").append(p.url == null ? "-" : p.url)
+                        .append("\n");
+            }
+            packageView.setText(out.toString());
+        });
+    }
+
+    private void renderTransferStatus() {
+        runOnUiThread(() -> transferView.setText("Transferência: " + transferMode + " / " + transferStage
+                + "\npart=" + transferPartIndex + " block=" + transferBlockIndex
+                + "\nframes=" + transferSentFrames + "/" + transferTotalFrames
+                + "\nrisco armado=" + riskArmed));
+    }
+
+    private void saveLog() {
+        ioExecutor.execute(() -> {
+            try {
+                File dir = new File(getExternalFilesDir(null), "exports");
+                if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("não foi possível criar exports");
+                File file = new File(dir, "orbis-ota-" + System.currentTimeMillis() + ".txt");
+                try (FileOutputStream output = new FileOutputStream(file)) {
+                    output.write(logView.getText().toString().getBytes(StandardCharsets.UTF_8));
+                }
+                append("Log salvo em " + file.getAbsolutePath());
+            } catch (Exception error) { append("Falha ao salvar log: " + error.getMessage()); }
+        });
+    }
+
+    private void copyLog() {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("Orbis OTA log", logView.getText()));
+            toast("Log copiado");
+        }
+    }
+
+    private void schedule(long delay, Runnable action) {
+        final Runnable[] holder = new Runnable[1];
+        holder[0] = () -> {
+            pendingTasks.remove(holder[0]);
+            if (!emergencyStopped) action.run();
+        };
+        pendingTasks.add(holder[0]);
