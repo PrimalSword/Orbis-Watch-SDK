@@ -1,4 +1,4 @@
-name: Build Orbis Watch Lab APK
+name: Build Orbis Watch OTA 5610 APK
 
 on:
   workflow_dispatch:
@@ -25,6 +25,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Assemble staged OTA source
+        run: |
+          cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java.part* \
+            > android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -39,16 +45,28 @@ jobs:
       - name: Build debug APK
         run: gradle -p android/OrbisWatchLab clean assembleDebug --stacktrace
 
-      - name: Rename APK
+      - name: Package outputs
         run: |
-          mkdir -p dist
+          mkdir -p dist/source
           cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk \
-             dist/Orbis-Watch-Lab-v2-emergency.apk
+             dist/Orbis-Watch-OTA-5610-v3.apk
+          cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
+          cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
+          cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-Lab-v2-emergency
-          path: dist/Orbis-Watch-Lab-v2-emergency.apk
+          name: Orbis-Watch-OTA-5610-v3
+          path: dist/Orbis-Watch-OTA-5610-v3.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-Watch-OTA-5610-v3-source
+          path: dist/Orbis-Watch-OTA-5610-v3-source.zip
           if-no-files-found: error
           retention-days: 30
