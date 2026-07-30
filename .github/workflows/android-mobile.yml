@@ -8,6 +8,12 @@ on:
     paths:
       - "mobile/android/**"
       - ".github/workflows/android-mobile.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "mobile/android/**"
+      - ".github/workflows/android-mobile.yml"
 
 permissions:
   contents: read
