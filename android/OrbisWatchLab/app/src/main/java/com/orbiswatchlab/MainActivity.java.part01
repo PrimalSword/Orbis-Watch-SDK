@@ -13,14 +13,37 @@
             append("Conexão GATT status=" + status + " state=" + newState);
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 gatt = currentGatt;
+                negotiatedMtu = 23;
                 setStatus("G28 conectado. Descobrindo serviços...");
                 if (hasConnectPermission()) {
-                    try { currentGatt.requestMtu(247); } catch (Exception ignored) { }
-                    currentGatt.discoverServices();
+                    boolean queued = false;
+                    try {
+                        queued = currentGatt.discoverServices();
+                    } catch (Exception error) {
+                        append("Falha ao solicitar descoberta de serviços: " + error.getMessage());
+                    }
+                    append("Descoberta de serviços solicitada queued=" + queued);
+                    if (!queued) {
+                        schedule(600, () -> {
+                            if (gatt == currentGatt && hasConnectPermission() && !emergencyStopped) {
+                                try {
+                                    boolean retry = currentGatt.discoverServices();
+                                    append("Nova tentativa de descoberta queued=" + retry);
+                                } catch (Exception error) {
+                                    append("Falha na nova tentativa de descoberta: " + error.getMessage());
+                                }
+                            }
+                        });
+                    }
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                if (status == 19) {
+                    append("Status 19: o relógio encerrou a conexão BLE pelo lado dele.");
+                }
                 clearCharacteristics();
                 stopTransfer("GATT desconectado");
+                if (gatt == currentGatt) gatt = null;
+                try { currentGatt.close(); } catch (Exception ignored) { }
                 setStatus(emergencyStopped ? "PARADA DE EMERGÊNCIA ATIVA" : "Relógio desconectado");
             }
         }
@@ -34,12 +57,17 @@
         @Override
         public void onServicesDiscovered(BluetoothGatt currentGatt, int status) {
             append("Serviços descobertos status=" + status);
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                setStatus("Falha ao descobrir serviços GATT: " + status);
+                return;
+            }
             discoverCharacteristics(currentGatt);
             queueNotifications();
             setStatus(otaWrite != null && otaNotify != null
                     ? "G28 pronto — canal OTA 5610 encontrado"
                     : "G28 pronto — OTA 5610 ainda não encontrado");
             renderOtaStatus();
+            append("MTU mantido em 23 nesta versão para evitar a desconexão observada durante a descoberta.");
         }
 
         @Override
