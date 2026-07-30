@@ -5,6 +5,7 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
@@ -15,7 +16,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Orbis Watch Lab"
+        android:label="Orbis Watch OTA 5610"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
