@@ -1,0 +1,135 @@
+        int versionLen = payload[4] & 0xFF;
+        int cursor = 5;
+        if (cursor + versionLen <= payload.length) {
+            otaVersion = new String(payload, cursor, versionLen, StandardCharsets.UTF_8);
+            cursor += versionLen;
+        }
+        if (cursor < payload.length) {
+            int projectLen = payload[cursor] & 0xFF;
+            cursor++;
+            if (cursor + projectLen <= payload.length) otaProject = new String(payload, cursor, projectLen, StandardCharsets.UTF_8);
+        }
+        append("OTA INFO → versão=" + otaVersion + " projeto=" + otaProject + " unique_code=" + otaUniqueCode);
+    }
+
+    private void queryOfficialServer() {
+        if (otaUniqueCode.isEmpty()) { toast("Primeiro execute Info OTA 0x01"); return; }
+        append("Consultando servidor oficial experimental com unique_code=" + otaUniqueCode);
+        ioExecutor.execute(() -> {
+            String[] keyNames = {"app_key", "app_id"};
+            for (String keyName : keyNames) {
+                try {
+                    Map<String, String> params = new LinkedHashMap<>();
+                    params.put(keyName, OTA_APP_KEY);
+                    params.put("unique_code", otaUniqueCode);
+                    params.put("sign", sign(params));
+                    String response = httpGet(OTA_ENDPOINT + "?" + queryString(params));
+                    append("SERVER " + keyName + " → " + abbreviate(response, 1800));
+                    if (response != null && response.contains("bin_list")) {
+                        parseJsonText(response);
+                        return;
+                    }
+                } catch (Exception error) {
+                    append("SERVER " + keyName + " falhou: " + error.getMessage());
+                }
+            }
+            append("Servidor não aceitou as duas assinaturas reconstruídas. O unique_code foi preservado para uso manual.");
+        });
+    }
+
+    private void choosePackage() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/octet-stream", "application/zip", "application/json", "text/plain"});
+        startActivityForResult(intent, REQUEST_PACKAGE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_PACKAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            loadPackage(uri);
+        }
+    }
+
+    private void loadPackage(Uri uri) {
+        packageView.setText("Lendo pacote...");
+        ioExecutor.execute(() -> {
+            try {
+                String name = displayName(uri);
+                byte[] bytes = readAll(getContentResolver().openInputStream(uri), 64 * 1024 * 1024);
+                firmwareParts.clear();
+                if (name.toLowerCase(Locale.US).endsWith(".zip") || isZip(bytes)) {
+                    parseZip(bytes);
+                } else if (name.toLowerCase(Locale.US).endsWith(".json") || firstNonSpace(bytes) == '{' || firstNonSpace(bytes) == '[') {
+                    parseJsonDocument(new String(bytes, StandardCharsets.UTF_8));
+                } else {
+                    FirmwarePart part = new FirmwarePart();
+                    part.name = name;
+                    part.data = bytes;
+                    part.length = bytes.length;
+                    firmwareParts.add(part);
+                }
+                renderPackage();
+                append("Pacote carregado: " + name + " bytes=" + bytes.length);
+            } catch (Exception error) {
+                append("Falha ao ler pacote: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+                runOnUiThread(() -> packageView.setText("Falha ao ler pacote: " + error.getMessage()));
+            }
+        });
+    }
+
+    private void parseZip(byte[] zipBytes) throws Exception {
+        ZipInputStream zin = new ZipInputStream(new java.io.ByteArrayInputStream(zipBytes));
+        ZipEntry entry;
+        List<String> jsonDocuments = new ArrayList<>();
+        while ((entry = zin.getNextEntry()) != null) {
+            if (entry.isDirectory()) continue;
+            byte[] data = readAll(zin, 32 * 1024 * 1024);
+            String lower = entry.getName().toLowerCase(Locale.US);
+            if (lower.endsWith(".bin")) {
+                FirmwarePart part = new FirmwarePart();
+                part.name = entry.getName();
+                part.data = data;
+                part.length = data.length;
+                part.mapping = inferMapping(entry.getName());
+                firmwareParts.add(part);
+            } else if (lower.endsWith(".json")) {
+                jsonDocuments.add(new String(data, StandardCharsets.UTF_8));
+            }
+        }
+        zin.close();
+        for (String json : jsonDocuments) mergeMetadataFromJson(json);
+        firmwareParts.sort(Comparator.comparingInt(a -> a.mapping < 0 ? 999 : a.mapping));
+    }
+
+    private void parseJsonText(String json) {
+        if (json == null || json.trim().isEmpty()) { toast("JSON vazio"); return; }
+        ioExecutor.execute(() -> {
+            try {
+                parseJsonDocument(json);
+                renderPackage();
+                append("JSON interpretado; registros=" + firmwareParts.size());
+            } catch (Exception error) {
+                append("Falha JSON: " + error.getMessage());
+            }
+        });
+    }
+
+    private void parseJsonDocument(String json) throws Exception {
+        firmwareParts.clear();
+        Object root = json.trim().startsWith("[") ? new JSONArray(json) : new JSONObject(json);
+        collectParts(root, firmwareParts);
+    }
+
+    private void mergeMetadataFromJson(String json) {
+        try {
+            List<FirmwarePart> metadata = new ArrayList<>();
+            Object root = json.trim().startsWith("[") ? new JSONArray(json) : new JSONObject(json);
+            collectParts(root, metadata);
+            for (FirmwarePart meta : metadata) {
+                for (FirmwarePart part : firmwareParts) {
+                    if (sameFile(part.name, meta.name) || (meta.mapping >= 0 && meta.mapping == part.mapping)) {
