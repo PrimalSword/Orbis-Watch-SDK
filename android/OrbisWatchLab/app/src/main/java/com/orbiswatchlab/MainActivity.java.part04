@@ -1,0 +1,146 @@
+        configureNextNotification();
+    }
+
+    private void configureNextNotification() {
+        if (gatt == null || notifyQueue.isEmpty() || !hasConnectPermission()) return;
+        BluetoothGattCharacteristic c = notifyQueue.removeFirst();
+        try {
+            gatt.setCharacteristicNotification(c, true);
+            BluetoothGattDescriptor descriptor = c.getDescriptor(CCCD_UUID);
+            if (descriptor == null) {
+                append("CCCD ausente em " + c.getUuid());
+                configureNextNotification();
+                return;
+            }
+            byte[] value = (c.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+                    ? BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                    : BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+            if (Build.VERSION.SDK_INT >= 33) {
+                int result = gatt.writeDescriptor(descriptor, value);
+                append("CCCD solicitado " + c.getUuid() + " result=" + result);
+                if (result != BluetoothGatt.GATT_SUCCESS) configureNextNotification();
+            } else {
+                descriptor.setValue(value);
+                boolean queued = gatt.writeDescriptor(descriptor);
+                append("CCCD solicitado " + c.getUuid() + " queued=" + queued);
+                if (!queued) configureNextNotification();
+            }
+        } catch (Exception error) {
+            append("Falha CCCD " + c.getUuid() + ": " + error.getMessage());
+            configureNextNotification();
+        }
+    }
+
+    private void dumpGatt() {
+        if (gatt == null) { toast("Conecte primeiro"); return; }
+        append("===== GATT DUMP =====");
+        for (BluetoothGattService service : gatt.getServices()) {
+            append("SERVICE " + service.getUuid());
+            for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                append("  CHAR " + c.getUuid() + " props=" + properties(c.getProperties()));
+            }
+        }
+        append("===== FIM GATT =====");
+    }
+
+    private void runOtaInspection() {
+        if (!ensureOtaReady("inspeção OTA")) return;
+        cancelPendingTasks();
+        experimentRunning = true;
+        append("Inspeção OTA: protocolo 0x0F → informações 0x01 → diagnóstico NUS.");
+        sendOtaProtocolProbe();
+        schedule(1_300, this::sendOtaInfoProbe);
+        schedule(3_000, () -> {
+            sendNusFrame(buildNusFrame(0xF3, 0x01, 0, 0, 0));
+            experimentRunning = false;
+        });
+    }
+
+    private void sendOtaProtocolProbe() {
+        if (!ensureOtaReady("protocolo OTA")) return;
+        byte[] frame = buildOta5610(0x0F, 1, 0, 0, new byte[]{0x10, 0x00});
+        append("OTA PROBE protocolo: " + hex(frame));
+        enqueueOtaBatch(Collections.singletonList(frame), null);
+    }
+
+    private void sendOtaInfoProbe() {
+        if (!ensureOtaReady("informações OTA")) return;
+        byte[] frame = buildOta5610(0x01, 1, 0, 0, new byte[0]);
+        append("OTA PROBE info: " + hex(frame));
+        enqueueOtaBatch(Collections.singletonList(frame), null);
+    }
+
+    private boolean ensureOtaReady(String operation) {
+        if (emergencyStopped) { toast("Emergência ativa"); return false; }
+        if (gatt == null || otaWrite == null || otaNotify == null || !hasConnectPermission()) {
+            toast("Canal OTA 5610 não está pronto para " + operation);
+            return false;
+        }
+        if (!otaNotificationsReady) append("Aviso: OTA notify ainda não confirmou CCCD; tentando mesmo assim.");
+        return true;
+    }
+
+    private void handleNotification(BluetoothGattCharacteristic characteristic, byte[] value) {
+        byte[] copy = value == null ? new byte[0] : value.clone();
+        append("RX " + characteristic.getUuid() + " " + hex(copy));
+        if (otaNotify != null && otaNotify.getUuid().equals(characteristic.getUuid())) {
+            consumeOtaNotification(copy);
+            return;
+        }
+        if (copy.length >= 5 && ((copy[0] & 0xFF) == 0xDF || (copy[0] & 0xFF) == 0xFD)) {
+            append(String.format(Locale.US, "  ↳ NUS %02X comando=0x%02X ASCII=\"%s\"", copy[0] & 0xFF, copy[4] & 0xFF, printableAscii(copy)));
+        }
+    }
+
+    private void consumeOtaNotification(byte[] chunk) {
+        if (chunk.length == 0) return;
+        if (otaRxBuffer.length == 0) {
+            if ((chunk[0] & 0xFF) != 0xD6 || chunk.length < 9) {
+                append("  ↳ OTA chunk sem cabeçalho D6");
+                return;
+            }
+            otaExpectedLength = 9 + (chunk[8] & 0xFF);
+        }
+        byte[] joined = new byte[otaRxBuffer.length + chunk.length];
+        System.arraycopy(otaRxBuffer, 0, joined, 0, otaRxBuffer.length);
+        System.arraycopy(chunk, 0, joined, otaRxBuffer.length, chunk.length);
+        otaRxBuffer = joined;
+        if (otaRxBuffer.length >= otaExpectedLength) {
+            byte[] frame = new byte[otaExpectedLength];
+            System.arraycopy(otaRxBuffer, 0, frame, 0, otaExpectedLength);
+            otaRxBuffer = new byte[0];
+            otaExpectedLength = 0;
+            parseOtaFrame(frame);
+        }
+    }
+
+    private void parseOtaFrame(byte[] frame) {
+        int command = frame[1] & 0xFF;
+        int version = frame[2] & 0xFF;
+        int status = frame[3] & 0xFF;
+        int block = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
+        int fragment = ((frame[6] & 0xFF) << 8) | (frame[7] & 0xFF);
+        int length = frame[8] & 0xFF;
+        byte[] payload = new byte[length];
+        if (length > 0) System.arraycopy(frame, 9, payload, 0, length);
+        append(String.format(Locale.US,
+                "  ↳ OTA D6 cmd=0x%02X ver=%d status=%d(%s) block=%d frag=%d len=%d payload=%s",
+                command, version, status, otaStatus(status), block, fragment, length, hex(payload)));
+
+        if (command == 0x0F && status == 1) {
+            parityStyle = true;
+            otaVersion = new String(payload, StandardCharsets.UTF_8).trim();
+            append("OTA protocolo/versão: " + otaVersion + " | parityStyle=true");
+        } else if (command == 0x01 && status == 1) {
+            parseOtaInfoPayload(payload);
+        }
+        handleTransferResponse(command, status, payload);
+        renderOtaStatus();
+    }
+
+    private void parseOtaInfoPayload(byte[] payload) {
+        otaUniqueCode = hexCompact(payload);
+        if (payload.length < 6) {
+            append("OTA info curta; unique_code=" + otaUniqueCode);
+            return;
+        }
