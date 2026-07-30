@@ -1,0 +1,131 @@
+                        if (meta.mapping >= 0) part.mapping = meta.mapping;
+                        if (meta.address >= 0) part.address = meta.address;
+                        if (meta.length > 0) part.length = meta.length;
+                        if (meta.url != null) part.url = meta.url;
+                    }
+                }
+            }
+        } catch (Exception error) {
+            append("Metadados JSON do ZIP não reconhecidos: " + error.getMessage());
+        }
+    }
+
+    private void collectParts(Object node, List<FirmwarePart> out) throws JSONException {
+        if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length(); i++) collectParts(array.get(i), out);
+            return;
+        }
+        if (!(node instanceof JSONObject)) return;
+        JSONObject object = (JSONObject) node;
+        if (object.has("part_id") || object.has("bin_file")) {
+            FirmwarePart part = new FirmwarePart();
+            part.mapping = object.optInt("part_id", -1);
+            part.address = parseLongFlexible(object.opt("part_addr"), -1);
+            part.length = (int) parseLongFlexible(object.opt("part_len"), 0);
+            part.url = object.optString("bin_file", null);
+            part.name = part.url == null ? "part-" + part.mapping + ".bin" : fileNameFromUrl(part.url);
+            out.add(part);
+        }
+        JSONArray names = object.names();
+        if (names == null) return;
+        for (int i = 0; i < names.length(); i++) {
+            Object child = object.opt(names.optString(i));
+            if (child instanceof JSONObject || child instanceof JSONArray) collectParts(child, out);
+        }
+    }
+
+    private void downloadRemoteBins() {
+        List<FirmwarePart> remote = new ArrayList<>();
+        for (FirmwarePart part : firmwareParts) if (part.data == null && part.url != null && part.url.startsWith("http")) remote.add(part);
+        if (remote.isEmpty()) { toast("Nenhum URL de BIN pendente"); return; }
+        append("Baixando " + remote.size() + " BIN(s)...");
+        ioExecutor.execute(() -> {
+            for (FirmwarePart part : remote) {
+                if (emergencyStopped) return;
+                try {
+                    part.data = httpGetBytes(part.url, 32 * 1024 * 1024);
+                    if (part.length <= 0) part.length = part.data.length;
+                    append("BIN baixado " + part.name + " bytes=" + part.data.length + " sha256=" + sha256(part.data));
+                } catch (Exception error) {
+                    append("Falha download " + part.url + ": " + error.getMessage());
+                }
+            }
+            renderPackage();
+        });
+    }
+
+    private void applyManualMetadata() {
+        if (firmwareParts.isEmpty()) { toast("Carregue um BIN primeiro"); return; }
+        try {
+            FirmwarePart part = firmwareParts.get(0);
+            part.mapping = Integer.parseInt(mappingInput.getText().toString().trim());
+            part.address = Long.parseLong(cleanHex(addressInput.getText().toString()), 16);
+            if (part.data != null) part.length = part.data.length;
+            renderPackage();
+        } catch (Exception error) {
+            toast("part_id/endereço inválido");
+        }
+    }
+
+    private void simulateTransfer() {
+        String problem = validatePackage(false);
+        if (problem != null) { toast(problem); return; }
+        int frameCount = 1;
+        long payload = 0;
+        for (FirmwarePart part : firmwareParts) {
+            int blocks = blockCount(part);
+            frameCount += (int) Math.ceil(blocks / 10.0);
+            frameCount += blocks;
+            frameCount += blocks * (int) Math.ceil(4096.0 / otaPayloadSize());
+            frameCount += 1;
+            payload += part.data.length;
+        }
+        frameCount += 1;
+        append("SIMULAÇÃO: parts=" + firmwareParts.size() + " bytes=" + payload + " frames≈" + frameCount
+                + " MTU=" + negotiatedMtu + " payload/frame=" + otaPayloadSize() + " parity=" + parityStyle);
+        for (FirmwarePart part : firmwareParts) {
+            append("  part=" + part.mapping + " addr=0x" + Long.toHexString(part.address).toUpperCase(Locale.US)
+                    + " bytes=" + part.data.length + " blocks=" + blockCount(part) + " sha256=" + sha256(part.data));
+        }
+    }
+
+    private void armRiskMode() {
+        if (!"RISCO G28".equals(riskInput.getText().toString().trim())) {
+            riskArmed = false;
+            toast("Digite exatamente RISCO G28");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Armar gravação real?")
+                .setMessage("O app poderá escrever em partições do relógio. Um part_id ou endereço errado pode causar brick. O relógio deve estar fora do pulso.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("ARMAR", (d, w) -> {
+                    riskArmed = true;
+                    append("MODO DE RISCO ARMADO pelo operador");
+                    toast("Modo de risco armado");
+                }).show();
+    }
+
+    private void confirmTransfer(TransferMode mode) {
+        if (!riskArmed) { toast("Arme o modo de risco primeiro"); return; }
+        if (!ensureOtaReady("gravação")) return;
+        String problem = validatePackage(mode == TransferMode.TABLE_ONLY);
+        if (problem != null) { toast(problem); return; }
+        String label = mode == TransferMode.TABLE_ONLY ? "enviar apenas a tabela" : mode == TransferMode.FIRST_BLOCK ? "gravar o primeiro bloco de 4096 bytes" : "gravar todo o pacote e enviar finalização/reboot";
+        new AlertDialog.Builder(this)
+                .setTitle("Confirmar operação de risco")
+                .setMessage("Operação: " + label + "\n\nPartições: " + firmwareParts.size() + "\nMTU: " + negotiatedMtu + "\n\nO botão de emergência só bloqueia os próximos quadros.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("EXECUTAR", (d, w) -> startTransfer(mode))
+                .show();
+    }
+
+    private void startTransfer(TransferMode mode) {
+        if (transferMode != TransferMode.NONE) { toast("Já existe transferência ativa"); return; }
+        transferMode = mode;
+        transferStage = TransferStage.WAIT_TABLE_ACK;
+        transferPartIndex = 0;
+        transferBlockIndex = 0;
+        transferGroupStart = 0;
+        transferSentFrames = 0;
