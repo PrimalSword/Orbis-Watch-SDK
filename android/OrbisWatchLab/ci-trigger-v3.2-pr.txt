@@ -1,0 +1,1 @@
+PR validation for passive GATT build v3.2.
