@@ -1,0 +1,142 @@
+            devices.put(safeAddress(device), new DeviceEntry(device, name == null ? "(sem nome)" : name, result.getRssi()));
+            runOnUiThread(MainActivity.this::renderDevices);
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            scanning = false;
+            append("SCAN FAILED: " + errorCode);
+            setStatus("Falha na busca BLE: " + errorCode);
+        }
+    };
+
+    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt currentGatt, int status, int newState) {
+            append("Conexão GATT status=" + status + " state=" + newState);
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                gatt = currentGatt;
+                setStatus("G28 conectado. Descobrindo serviços...");
+                if (hasConnectPermission()) {
+                    try { currentGatt.requestMtu(247); } catch (Exception ignored) { }
+                    currentGatt.discoverServices();
+                }
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                clearCharacteristics();
+                stopTransfer("GATT desconectado");
+                setStatus(emergencyStopped ? "PARADA DE EMERGÊNCIA ATIVA" : "Relógio desconectado");
+            }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt currentGatt, int mtu, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) negotiatedMtu = mtu;
+            append("MTU negociado=" + mtu + " status=" + status + " payload OTA=" + otaPayloadSize());
+        }
+
+        @Override
+        public void onServicesDiscovered(BluetoothGatt currentGatt, int status) {
+            append("Serviços descobertos status=" + status);
+            discoverCharacteristics(currentGatt);
+            queueNotifications();
+            setStatus(otaWrite != null && otaNotify != null
+                    ? "G28 pronto — canal OTA 5610 encontrado"
+                    : "G28 pronto — OTA 5610 ainda não encontrado");
+            renderOtaStatus();
+        }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt currentGatt, BluetoothGattCharacteristic characteristic, int status) {
+            append("Write concluído " + characteristic.getUuid() + " status=" + status);
+            if (otaWrite != null && otaWrite.getUuid().equals(characteristic.getUuid())) {
+                otaWriteToken++;
+                otaWriteBusy = false;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    stopTransfer("Falha de escrita OTA status=" + status);
+                    otaTxQueue.clear();
+                    return;
+                }
+                transferSentFrames++;
+                renderTransferStatus();
+                schedule(12, MainActivity.this::pumpOtaQueue);
+            }
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt currentGatt, BluetoothGattCharacteristic characteristic, int status) {
+            handleRead(characteristic, characteristic.getValue(), status);
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt currentGatt, BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+            handleRead(characteristic, value, status);
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt currentGatt, BluetoothGattCharacteristic characteristic) {
+            handleNotification(characteristic, characteristic.getValue());
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt currentGatt, BluetoothGattCharacteristic characteristic, byte[] value) {
+            handleNotification(characteristic, value);
+        }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt currentGatt, BluetoothGattDescriptor descriptor, int status) {
+            append("NOTIFY configurado " + descriptor.getCharacteristic().getUuid() + " status=" + status);
+            if (otaNotify != null && otaNotify.getUuid().equals(descriptor.getCharacteristic().getUuid())
+                    && status == BluetoothGatt.GATT_SUCCESS) {
+                otaNotificationsReady = true;
+                renderOtaStatus();
+            }
+            configureNextNotification();
+        }
+    };
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        buildUi();
+        initialiseBluetooth();
+    }
+
+    private void buildUi() {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(12), dp(10), dp(12), dp(8));
+
+        TextView title = text("Orbis Watch OTA 5610", 27, true);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
+        outer.addView(title, matchWrap());
+
+        TextView subtitle = text("Inspetor e transmissor experimental do G28", 15, false);
+        subtitle.setGravity(Gravity.CENTER_HORIZONTAL);
+        subtitle.setPadding(0, dp(4), 0, dp(8));
+        outer.addView(subtitle, matchWrap());
+
+        statusView = text("Inicializando Bluetooth...", 16, false);
+        statusView.setPadding(dp(7), dp(7), dp(7), dp(7));
+        outer.addView(statusView, matchWrap());
+
+        Button emergencyButton = button("EMERGÊNCIA — PARAR, BLOQUEAR E DESCONECTAR");
+        emergencyButton.setTextColor(Color.WHITE);
+        emergencyButton.setBackgroundColor(Color.rgb(168, 24, 24));
+        emergencyButton.setOnClickListener(v -> emergencyStop());
+        outer.addView(emergencyButton, marginLayout(0, 6, 0, 5));
+
+        TextView warning = text(
+                "Use o relógio fora do pulso. O botão interrompe quadros futuros e encerra o GATT, " +
+                        "mas não desfaz bytes que já tenham sido gravados.", 12, false);
+        outer.addView(warning, marginLayout(2, 0, 2, 6));
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(content);
+        outer.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        content.addView(section("Conexão"), matchWrap());
+        Button permission = button("1. Permitir Bluetooth");
+        permission.setOnClickListener(v -> requestBluetoothPermissions());
+        content.addView(permission, marginLayout(0, 3, 0, 3));
