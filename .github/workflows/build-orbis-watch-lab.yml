@@ -7,6 +7,11 @@ on:
     paths:
       - "android/OrbisWatchLab/**"
       - ".github/workflows/build-orbis-watch-lab.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisWatchLab/**"
+      - ".github/workflows/build-orbis-watch-lab.yml"
 
 permissions:
   contents: read
