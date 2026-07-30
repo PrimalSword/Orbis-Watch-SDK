@@ -1,0 +1,142 @@
+        handler.postDelayed(holder[0], delay);
+    }
+
+    private void cancelPendingTasks() {
+        for (Runnable task : new ArrayList<>(pendingTasks)) handler.removeCallbacks(task);
+        pendingTasks.clear();
+    }
+
+    private String displayName(Uri uri) {
+        String result = "package.bin";
+        android.database.Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) result = cursor.getString(index);
+            }
+        } catch (Exception ignored) { }
+        finally { if (cursor != null) cursor.close(); }
+        return result;
+    }
+
+    private static byte[] readAll(InputStream input, int maxBytes) throws Exception {
+        if (input == null) throw new IllegalArgumentException("stream nulo");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) throw new IllegalArgumentException("arquivo excede " + maxBytes + " bytes");
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static boolean isZip(byte[] data) { return data.length >= 4 && data[0] == 'P' && data[1] == 'K'; }
+    private static char firstNonSpace(byte[] data) {
+        for (byte b : data) { char c = (char)(b & 0xFF); if (!Character.isWhitespace(c)) return c; }
+        return 0;
+    }
+
+    private static int inferMapping(String name) {
+        String lower = name.toLowerCase(Locale.US);
+        for (int i = 0; i < 256; i++) {
+            String decimal = "part" + i;
+            String hex = String.format(Locale.US, "0x%02x", i);
+            if (lower.contains(decimal) || lower.contains(hex)) return i;
+        }
+        return -1;
+    }
+
+    private static boolean sameFile(String a, String b) {
+        if (a == null || b == null) return false;
+        return new File(a).getName().equalsIgnoreCase(new File(b).getName());
+    }
+
+    private static long parseLongFlexible(Object value, long fallback) {
+        if (value == null || value == JSONObject.NULL) return fallback;
+        if (value instanceof Number) return ((Number)value).longValue();
+        String text = String.valueOf(value).trim().toLowerCase(Locale.US);
+        try { return text.startsWith("0x") ? Long.parseLong(text.substring(2), 16) : Long.parseLong(text); }
+        catch (Exception ignored) { return fallback; }
+    }
+
+    private static String fileNameFromUrl(String url) {
+        int slash = url.lastIndexOf('/');
+        return slash >= 0 ? url.substring(slash + 1) : url;
+    }
+
+    private static String httpGet(String url) throws Exception {
+        return new String(httpGetBytes(url, 4 * 1024 * 1024), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] httpGetBytes(String url, int limit) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(12_000);
+        connection.setReadTimeout(25_000);
+        connection.setRequestProperty("User-Agent", "HryFine/3.8.8 OrbisOTA/3.0");
+        int code = connection.getResponseCode();
+        InputStream input = code >= 200 && code < 400 ? connection.getInputStream() : connection.getErrorStream();
+        byte[] data = readAll(input, limit);
+        connection.disconnect();
+        if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code + " " + new String(data, StandardCharsets.UTF_8));
+        return data;
+    }
+
+    private static String sign(Map<String, String> params) throws Exception {
+        List<String> keys = new ArrayList<>(params.keySet());
+        Collections.sort(keys);
+        StringBuilder source = new StringBuilder();
+        for (String key : keys) source.append(key).append('=').append(params.get(key)).append('&');
+        source.append(OTA_SECRET);
+        MessageDigest digest = MessageDigest.getInstance("MD5");
+        return hexCompact(digest.digest(source.toString().getBytes(StandardCharsets.UTF_8))).toLowerCase(Locale.US);
+    }
+
+    private static String queryString(Map<String, String> params) throws Exception {
+        StringBuilder out = new StringBuilder();
+        for (Map.Entry<String, String> e : params.entrySet()) {
+            if (out.length() > 0) out.append('&');
+            out.append(java.net.URLEncoder.encode(e.getKey(), "UTF-8"));
+            out.append('=').append(java.net.URLEncoder.encode(e.getValue(), "UTF-8"));
+        }
+        return out.toString();
+    }
+
+    private static String sha256(byte[] data) {
+        try { return hexCompact(MessageDigest.getInstance("SHA-256").digest(data)).toLowerCase(Locale.US); }
+        catch (Exception error) { return "erro"; }
+    }
+
+    private static String otaStatus(int status) {
+        switch (status) {
+            case 0: return "request/sem status";
+            case 1: return "correto";
+            case 2: return "cabeçalho inválido";
+            case 3: return "checksum inválido";
+            case 4: return "versão de protocolo inválida";
+            case 5: return "tamanho inválido";
+            case 6: return "protocolo inválido";
+            case 7: return "erro checksum 4K";
+            case 8: return "BLE desconectado";
+            case 9: return "timeout local";
+            case 10: return "firmware excede limite";
+            default: return "desconhecido";
+        }
+    }
+
+    private static String properties(int p) {
+        List<String> values = new ArrayList<>();
+        if ((p & BluetoothGattCharacteristic.PROPERTY_READ) != 0) values.add("READ");
+        if ((p & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) values.add("WRITE");
+        if ((p & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) values.add("WRITE_NR");
+        if ((p & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) values.add("NOTIFY");
+        if ((p & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) values.add("INDICATE");
+        return values.toString();
+    }
+
+    private static String cleanHex(String text) { return text == null ? "" : text.replaceAll("[^0-9A-Fa-f]", ""); }
+    private static String hex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "(vazio)";
