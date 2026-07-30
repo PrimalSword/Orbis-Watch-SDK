@@ -28,6 +28,10 @@
         gattDump.setOnClickListener(v -> dumpGatt());
         content.addView(gattDump, marginLayout(0, 2, 0, 2));
 
+        Button notifyNus = button("Ativar somente notificações NUS (manual)");
+        notifyNus.setOnClickListener(v -> activateNusNotifications());
+        content.addView(notifyNus, marginLayout(0, 2, 0, 2));
+
         Button notifyOta = button("Ativar notificações OTA 5610");
         notifyOta.setOnClickListener(v -> activateOtaNotifications());
         content.addView(notifyOta, marginLayout(0, 2, 0, 2));
