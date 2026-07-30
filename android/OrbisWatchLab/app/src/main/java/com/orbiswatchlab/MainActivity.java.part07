@@ -1,0 +1,120 @@
+        transferTotalFrames = estimateFrames(mode);
+        experimentRunning = true;
+        append("TRANSFER START mode=" + mode + " parts=" + firmwareParts.size());
+        byte[] tablePayload = buildPartitionTable();
+        enqueueOtaBatch(Collections.singletonList(buildOta5610(0x03, 1, 0, 0, tablePayload)), () -> append("Tabela enviada; aguardando ACK cmd 0x03"));
+        renderTransferStatus();
+    }
+
+    private void handleTransferResponse(int command, int status, byte[] payload) {
+        if (transferMode == TransferMode.NONE) return;
+        if (status != 1) {
+            stopTransfer("Relógio respondeu erro cmd=0x" + String.format(Locale.US, "%02X", command) + " status=" + status + " " + otaStatus(status));
+            return;
+        }
+        if (transferStage == TransferStage.WAIT_TABLE_ACK && command == 0x03) {
+            if (transferMode == TransferMode.TABLE_ONLY) {
+                stopTransfer("Tabela aceita pelo relógio");
+            } else {
+                transferStage = TransferStage.WAIT_GROUP_ACK;
+                sendChecksumGroup();
+            }
+        } else if (transferStage == TransferStage.WAIT_GROUP_ACK && command == 0x02) {
+            int result = payload.length > 0 ? payload[0] & 0xFF : 0xFF;
+            append("ACK grupo checksum result=0x" + String.format(Locale.US, "%02X", result));
+            transferStage = TransferStage.WAIT_BLOCK_ACK;
+            sendCurrentBlock();
+        } else if (transferStage == TransferStage.WAIT_BLOCK_ACK && command == 0x02) {
+            append("ACK bloco part=" + currentPart().mapping + " block=" + transferBlockIndex);
+            if (transferMode == TransferMode.FIRST_BLOCK) {
+                stopTransfer("Primeiro bloco confirmado; teste encerrado sem checksum total/finalização");
+                return;
+            }
+            transferBlockIndex++;
+            int blocks = blockCount(currentPart());
+            if (transferBlockIndex >= blocks) {
+                transferStage = TransferStage.WAIT_TOTAL_ACK;
+                sendPartTotalChecksum();
+            } else if (transferBlockIndex >= transferGroupStart + transferGroupCount) {
+                transferStage = TransferStage.WAIT_GROUP_ACK;
+                sendChecksumGroup();
+            } else {
+                sendCurrentBlock();
+            }
+        } else if (transferStage == TransferStage.WAIT_TOTAL_ACK && command == 0x0A) {
+            append("Checksum total aceito para part=" + currentPart().mapping);
+            transferPartIndex++;
+            if (transferPartIndex >= firmwareParts.size()) {
+                transferStage = TransferStage.WAIT_FINISH_ACK;
+                enqueueOtaBatch(Collections.singletonList(buildOta5610(0x0E, 1, 0, 0, new byte[0])), () -> append("Finalização 0x0E enviada; aguardando resposta/reboot"));
+            } else {
+                transferBlockIndex = 0;
+                transferStage = TransferStage.WAIT_GROUP_ACK;
+                sendChecksumGroup();
+            }
+        } else if (transferStage == TransferStage.WAIT_FINISH_ACK && command == 0x0E) {
+            stopTransfer("OTA finalizada; o relógio pode reiniciar");
+        }
+    }
+
+    private void sendChecksumGroup() {
+        FirmwarePart part = currentPart();
+        int blocks = blockCount(part);
+        transferGroupStart = transferBlockIndex;
+        transferGroupCount = Math.min(10, blocks - transferGroupStart);
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        for (int i = 0; i < transferGroupCount; i++) {
+            byte[] block = blockData(part, transferGroupStart + i);
+            int[] sums = blockChecksums(block);
+            writeIntBE(payload, sums[0]);
+            if (parityStyle) writeIntBE(payload, sums[1]);
+        }
+        byte[] frame = buildOta5610(0x02, 1, transferGroupStart, 0, payload.toByteArray());
+        append("TX checksum group part=" + part.mapping + " start=" + transferGroupStart + " count=" + transferGroupCount);
+        enqueueOtaBatch(Collections.singletonList(frame), () -> append("Grupo de checksums enviado; aguardando ACK"));
+    }
+
+    private void sendCurrentBlock() {
+        FirmwarePart part = currentPart();
+        byte[] block = blockData(part, transferBlockIndex);
+        int chunk = otaPayloadSize();
+        List<byte[]> frames = new ArrayList<>();
+        int fragment = 0;
+        for (int offset = 0; offset < block.length; offset += chunk) {
+            int len = Math.min(chunk, block.length - offset);
+            byte[] payload = new byte[len];
+            System.arraycopy(block, offset, payload, 0, len);
+            frames.add(buildOta5610(part.mapping, 1, transferBlockIndex, fragment, payload));
+            fragment++;
+        }
+        int[] sums = blockChecksums(block);
+        ByteArrayOutputStream checksum = new ByteArrayOutputStream();
+        writeIntBE(checksum, sums[0]);
+        if (parityStyle) writeIntBE(checksum, sums[1]);
+        frames.add(buildOta5610(0x02, 1, transferBlockIndex, 0, checksum.toByteArray()));
+        append("TX bloco part=" + part.mapping + " block=" + transferBlockIndex + " fragments=" + fragment + " checksum=" + hex(checksum.toByteArray()));
+        enqueueOtaBatch(frames, () -> append("Bloco enviado; aguardando ACK 4K"));
+    }
+
+    private void sendPartTotalChecksum() {
+        FirmwarePart part = currentPart();
+        long sum = 0;
+        for (byte b : part.data) sum = (sum + (b & 0xFF)) & 0xFFFFFFFFL;
+        byte[] payload = new byte[]{(byte)(sum >> 24), (byte)(sum >> 16), (byte)(sum >> 8), (byte)sum};
+        append("TX checksum total part=" + part.mapping + " sum=0x" + Long.toHexString(sum).toUpperCase(Locale.US));
+        enqueueOtaBatch(Collections.singletonList(buildOta5610(0x0A, 1, 0, 0, payload)), () -> append("Checksum total enviado; aguardando ACK"));
+    }
+
+    private void enqueueOtaBatch(List<byte[]> frames, Runnable completion) {
+        if (emergencyStopped) { append("OTA batch bloqueado pela emergência"); return; }
+        if (otaWrite == null || gatt == null) { append("OTA batch cancelado: characteristic ausente"); return; }
+        if (!otaTxQueue.isEmpty() || otaWriteBusy) {
+            append("OTA fila ocupada; novo batch recusado para evitar mistura de sessões");
+            return;
+        }
+        for (byte[] frame : frames) otaTxQueue.add(new TxItem(frame));
+        otaBatchCompletion = completion;
+        pumpOtaQueue();
+    }
+
+    private void pumpOtaQueue() {
