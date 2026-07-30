@@ -1,0 +1,82 @@
+        StringBuilder out = new StringBuilder();
+        for (byte b : bytes) { if (out.length() > 0) out.append(' '); out.append(String.format(Locale.US, "%02X", b & 0xFF)); }
+        return out.toString();
+    }
+    private static String hexCompact(byte[] bytes) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : bytes) out.append(String.format(Locale.US, "%02X", b & 0xFF));
+        return out.toString();
+    }
+    private static String printableAscii(byte[] bytes) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : bytes) { int u = b & 0xFF; out.append(u >= 32 && u <= 126 ? (char)u : '.'); }
+        return out.toString();
+    }
+    private static String abbreviate(String value, int max) { return value == null ? "null" : value.length() <= max ? value : value.substring(0, max) + "…"; }
+    private static String emptyAsDash(String value) { return value == null || value.isEmpty() ? "-" : value; }
+    private static UUID uuid(String value) { return UUID.fromString(value); }
+    private static String uuidOf(BluetoothGattCharacteristic c) { return c == null ? "-" : c.getUuid().toString(); }
+
+    private String safeName(BluetoothDevice device) {
+        if (!hasConnectPermission()) return "(sem permissão)";
+        try { String name = device.getName(); return name == null || name.trim().isEmpty() ? "(sem nome)" : name; }
+        catch (SecurityException error) { return "(sem permissão)"; }
+    }
+    private String safeAddress(BluetoothDevice device) {
+        if (!hasConnectPermission()) return "(protegido)";
+        try { return device.getAddress(); } catch (SecurityException error) { return "(protegido)"; }
+    }
+
+    private void setStatus(String status) { runOnUiThread(() -> statusView.setText("Status: " + status)); }
+    private void append(String message) { runOnUiThread(() -> logView.append(clock.format(new Date()) + "  " + message + "\n")); }
+    private void toast(String message) { runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show()); }
+
+    private TextView text(String value, int size, boolean bold) {
+        TextView view = new TextView(this); view.setText(value); view.setTextSize(size); if (bold) view.setTypeface(Typeface.DEFAULT_BOLD); return view;
+    }
+    private TextView section(String value) { TextView view = text(value, 18, true); view.setPadding(0, dp(10), 0, dp(2)); return view; }
+    private Button button(String label) { Button b = new Button(this); b.setText(label); b.setTextSize(14); b.setAllCaps(false); b.setMinHeight(dp(50)); return b; }
+    private LinearLayout horizontal() { LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); return row; }
+    private EditText numericInput(String hint, String value) { EditText e = new EditText(this); e.setHint(hint); e.setText(value); e.setSingleLine(true); e.setInputType(InputType.TYPE_CLASS_NUMBER); return e; }
+    private EditText hexInput(String hint, String value) { EditText e = new EditText(this); e.setHint(hint); e.setText(value); e.setSingleLine(true); e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS); return e; }
+    private LinearLayout.LayoutParams matchWrap() { return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); }
+    private LinearLayout.LayoutParams marginLayout(int l, int t, int r, int b) { LinearLayout.LayoutParams p = matchWrap(); p.setMargins(dp(l), dp(t), dp(r), dp(b)); return p; }
+    private LinearLayout.LayoutParams weightedButton() { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f); p.setMargins(dp(2), dp(1), dp(2), dp(1)); return p; }
+    private int dp(int value) { return (int)(value * getResources().getDisplayMetrics().density + 0.5f); }
+
+    private static void writeIntBE(ByteArrayOutputStream output, int value) {
+        output.write((value >> 24) & 0xFF); output.write((value >> 16) & 0xFF); output.write((value >> 8) & 0xFF); output.write(value & 0xFF);
+    }
+
+    @Override
+    protected void onDestroy() {
+        cancelPendingTasks();
+        stopScan();
+        stopTransfer("Activity destruída");
+        disconnectGattOnly();
+        ioExecutor.shutdownNow();
+        super.onDestroy();
+    }
+
+    private enum TransferMode { NONE, TABLE_ONLY, FIRST_BLOCK, FULL }
+    private enum TransferStage { IDLE, WAIT_TABLE_ACK, WAIT_GROUP_ACK, WAIT_BLOCK_ACK, WAIT_TOTAL_ACK, WAIT_FINISH_ACK }
+
+    private static final class DeviceEntry {
+        final BluetoothDevice device; final String name; final int rssi;
+        DeviceEntry(BluetoothDevice device, String name, int rssi) { this.device = device; this.name = name; this.rssi = rssi; }
+    }
+
+    private static final class TxItem {
+        final byte[] data;
+        TxItem(byte[] data) { this.data = data; }
+    }
+
+    private static final class FirmwarePart {
+        int mapping = -1;
+        long address = -1;
+        int length;
+        String name = "part.bin";
+        String url;
+        byte[] data;
+    }
+}
