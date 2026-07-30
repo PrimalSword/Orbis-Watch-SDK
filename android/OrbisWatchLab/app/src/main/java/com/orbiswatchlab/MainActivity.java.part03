@@ -131,6 +131,17 @@
         configureNextNotification();
     }
 
+    private void activateNusNotifications() {
+        if (gatt == null || nusNotify == null) {
+            toast("Characteristic NUS notify não encontrada");
+            return;
+        }
+        notifyQueue.clear();
+        notifyQueue.add(nusNotify);
+        append("Ativação manual solicitada: somente NUS notify.");
+        configureNextNotification();
+    }
+
     private void activateOtaNotifications() {
         if (gatt == null || otaNotify == null) { toast("Characteristic OTA notify não encontrada"); return; }
         notifyQueue.clear();
