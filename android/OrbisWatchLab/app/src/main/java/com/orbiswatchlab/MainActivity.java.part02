@@ -1,0 +1,130 @@
+        Button scan = button("2. Procurar relógio");
+        scan.setOnClickListener(v -> startScan());
+        content.addView(scan, marginLayout(0, 3, 0, 3));
+
+        deviceGroup = new RadioGroup(this);
+        deviceGroup.setOrientation(RadioGroup.VERTICAL);
+        content.addView(deviceGroup, matchWrap());
+
+        Button connect = button("3. Conectar ao selecionado");
+        connect.setOnClickListener(v -> connectSelected());
+        content.addView(connect, marginLayout(0, 3, 0, 3));
+
+        LinearLayout connectRow = horizontal();
+        Button disconnect = button("Desconectar");
+        disconnect.setOnClickListener(v -> disconnect());
+        Button rearm = button("Rearmar");
+        rearm.setOnClickListener(v -> rearmLaboratory());
+        connectRow.addView(disconnect, weightedButton());
+        connectRow.addView(rearm, weightedButton());
+        content.addView(connectRow, marginLayout(0, 1, 0, 8));
+
+        content.addView(section("Inspeção OTA 5610"), matchWrap());
+        otaView = text("Canal OTA ainda não inspecionado.", 13, false);
+        otaView.setTypeface(Typeface.MONOSPACE);
+        content.addView(otaView, marginLayout(2, 2, 2, 4));
+
+        Button gattDump = button("Listar todos os serviços e characteristics");
+        gattDump.setOnClickListener(v -> dumpGatt());
+        content.addView(gattDump, marginLayout(0, 2, 0, 2));
+
+        Button notifyOta = button("Ativar notificações OTA 5610");
+        notifyOta.setOnClickListener(v -> activateOtaNotifications());
+        content.addView(notifyOta, marginLayout(0, 2, 0, 2));
+
+        LinearLayout probeRow = horizontal();
+        Button protocol = button("Protocolo 0x0F");
+        protocol.setOnClickListener(v -> sendOtaProtocolProbe());
+        Button info = button("Info OTA 0x01");
+        info.setOnClickListener(v -> sendOtaInfoProbe());
+        probeRow.addView(protocol, weightedButton());
+        probeRow.addView(info, weightedButton());
+        content.addView(probeRow, marginLayout(0, 2, 0, 2));
+
+        Button fullProbe = button("Executar inspeção OTA completa");
+        fullProbe.setOnClickListener(v -> runOtaInspection());
+        content.addView(fullProbe, marginLayout(0, 2, 0, 3));
+
+        Button server = button("Consultar servidor oficial com o unique_code (experimental)");
+        server.setOnClickListener(v -> queryOfficialServer());
+        content.addView(server, marginLayout(0, 2, 0, 7));
+
+        content.addView(section("Pacote de firmware"), matchWrap());
+        Button choose = button("Importar .BIN, .ZIP ou JSON");
+        choose.setOnClickListener(v -> choosePackage());
+        content.addView(choose, marginLayout(0, 2, 0, 2));
+
+        jsonInput = new EditText(this);
+        jsonInput.setHint("Opcional: cole aqui o JSON oficial com bin_list");
+        jsonInput.setMinLines(3);
+        jsonInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        content.addView(jsonInput, marginLayout(0, 2, 0, 2));
+
+        Button parseJson = button("Interpretar JSON colado");
+        parseJson.setOnClickListener(v -> parseJsonText(jsonInput.getText().toString()));
+        content.addView(parseJson, marginLayout(0, 2, 0, 3));
+
+        Button downloadBins = button("Baixar os BINs listados no JSON");
+        downloadBins.setOnClickListener(v -> downloadRemoteBins());
+        content.addView(downloadBins, marginLayout(0, 2, 0, 3));
+
+        packageView = text("Nenhum pacote carregado.", 13, false);
+        packageView.setTypeface(Typeface.MONOSPACE);
+        packageView.setTextIsSelectable(true);
+        content.addView(packageView, marginLayout(2, 3, 2, 5));
+
+        LinearLayout metadataRow = horizontal();
+        mappingInput = numericInput("part_id", "1");
+        addressInput = hexInput("endereço HEX", "00000000");
+        metadataRow.addView(mappingInput, weightedButton());
+        metadataRow.addView(addressInput, weightedButton());
+        content.addView(metadataRow, marginLayout(0, 2, 0, 3));
+
+        Button applyMetadata = button("Aplicar part_id/endereço ao primeiro BIN");
+        applyMetadata.setOnClickListener(v -> applyManualMetadata());
+        content.addView(applyMetadata, marginLayout(0, 2, 0, 3));
+
+        Button simulate = button("Simular quadros sem transmitir");
+        simulate.setOnClickListener(v -> simulateTransfer());
+        content.addView(simulate, marginLayout(0, 2, 0, 7));
+
+        content.addView(section("Modo de risco — gravação real"), matchWrap());
+        TextView riskNote = text(
+                "A estrutura foi reconstruída do HryFine: tabela de partições, blocos de 4096 bytes, " +
+                        "fragmentos MTU-14, checksums por bloco/grupo e checksum total. " +
+                        "Metadados errados podem inutilizar o relógio.", 13, false);
+        content.addView(riskNote, marginLayout(2, 2, 2, 3));
+
+        riskInput = new EditText(this);
+        riskInput.setHint("Digite RISCO G28 para armar");
+        riskInput.setSingleLine(true);
+        content.addView(riskInput, marginLayout(0, 2, 0, 2));
+
+        Button arm = button("ARMAR MODO DE RISCO");
+        arm.setOnClickListener(v -> armRiskMode());
+        content.addView(arm, marginLayout(0, 2, 0, 4));
+
+        LinearLayout riskRow1 = horizontal();
+        Button table = button("Enviar tabela");
+        table.setOnClickListener(v -> confirmTransfer(TransferMode.TABLE_ONLY));
+        Button firstBlock = button("Gravar só 1º bloco");
+        firstBlock.setOnClickListener(v -> confirmTransfer(TransferMode.FIRST_BLOCK));
+        riskRow1.addView(table, weightedButton());
+        riskRow1.addView(firstBlock, weightedButton());
+        content.addView(riskRow1, marginLayout(0, 2, 0, 2));
+
+        Button fullFlash = button("GRAVAR PACOTE COMPLETO E FINALIZAR");
+        fullFlash.setTextColor(Color.WHITE);
+        fullFlash.setBackgroundColor(Color.rgb(120, 45, 15));
+        fullFlash.setOnClickListener(v -> confirmTransfer(TransferMode.FULL));
+        content.addView(fullFlash, marginLayout(0, 2, 0, 3));
+
+        transferView = text("Transferência: inativa", 13, true);
+        transferView.setTypeface(Typeface.MONOSPACE);
+        content.addView(transferView, marginLayout(2, 2, 2, 7));
+
+        content.addView(section("Log"), matchWrap());
+        LinearLayout logRow = horizontal();
+        Button copy = button("Copiar log");
+        copy.setOnClickListener(v -> copyLog());
+        Button save = button("Salvar log");
