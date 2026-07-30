@@ -1,0 +1,137 @@
+        save.setOnClickListener(v -> saveLog());
+        Button clear = button("Limpar");
+        clear.setOnClickListener(v -> logView.setText(""));
+        logRow.addView(copy, weightedButton());
+        logRow.addView(save, weightedButton());
+        logRow.addView(clear, weightedButton());
+        content.addView(logRow, marginLayout(0, 2, 0, 3));
+
+        logView = text("", 12, false);
+        logView.setTypeface(Typeface.MONOSPACE);
+        logView.setTextIsSelectable(true);
+        logView.setPadding(dp(3), dp(5), dp(3), dp(30));
+        content.addView(logView, matchWrap());
+
+        setContentView(outer);
+    }
+
+    private void initialiseBluetooth() {
+        BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        if (manager == null) { setStatus("BluetoothManager indisponível"); return; }
+        adapter = manager.getAdapter();
+        if (adapter == null) { setStatus("Celular sem Bluetooth"); return; }
+        scanner = adapter.getBluetoothLeScanner();
+        setStatus(adapter.isEnabled() ? "Pronto para procurar o G28" : "Ative o Bluetooth");
+        requestBluetoothPermissions();
+    }
+
+    private void requestBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (!hasScanPermission() || !hasConnectPermission()) {
+                requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_PERMISSIONS);
+                return;
+            }
+        } else if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSIONS);
+            return;
+        }
+        toast("Permissões Bluetooth prontas");
+    }
+
+    private boolean hasScanPermission() {
+        return Build.VERSION.SDK_INT < 31 || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasConnectPermission() {
+        return Build.VERSION.SDK_INT < 31 || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startScan() {
+        if (emergencyStopped) { toast("Rearme antes de procurar"); return; }
+        if (!hasScanPermission()) { requestBluetoothPermissions(); return; }
+        if (adapter == null || !adapter.isEnabled()) { setStatus("Ative o Bluetooth"); return; }
+        scanner = adapter.getBluetoothLeScanner();
+        if (scanner == null) { setStatus("Scanner BLE indisponível"); return; }
+        stopScan();
+        devices.clear();
+        renderDevices();
+        scanning = true;
+        scanner.startScan(scanCallback);
+        setStatus("Procurando dispositivos BLE...");
+        append("Busca BLE iniciada");
+        schedule(12_000, () -> {
+            stopScan();
+            setStatus(devices.isEmpty() ? "Nenhum dispositivo encontrado" : "Selecione o G28 e conecte");
+        });
+    }
+
+    private void stopScan() {
+        if (scanner != null && scanning && hasScanPermission()) {
+            try { scanner.stopScan(scanCallback); } catch (Exception ignored) { }
+        }
+        scanning = false;
+    }
+
+    private void renderDevices() {
+        if (deviceGroup == null) return;
+        deviceGroup.removeAllViews();
+        List<DeviceEntry> entries = new ArrayList<>(devices.values());
+        entries.sort((a, b) -> {
+            boolean ag = a.name.toUpperCase(Locale.US).contains("G28");
+            boolean bg = b.name.toUpperCase(Locale.US).contains("G28");
+            if (ag != bg) return ag ? -1 : 1;
+            return Integer.compare(b.rssi, a.rssi);
+        });
+        for (DeviceEntry entry : entries) {
+            RadioButton item = new RadioButton(this);
+            item.setText(entry.name + " / " + safeAddress(entry.device) + "  RSSI=" + entry.rssi);
+            item.setTextSize(15);
+            item.setTag(entry.device);
+            item.setOnCheckedChangeListener((button, checked) -> { if (checked) selectedDevice = (BluetoothDevice) button.getTag(); });
+            deviceGroup.addView(item, matchWrap());
+            if (entry.name.toUpperCase(Locale.US).contains("G28") || "41:42:99:10:58:57".equalsIgnoreCase(safeAddress(entry.device))) item.setChecked(true);
+        }
+    }
+
+    private void connectSelected() {
+        if (emergencyStopped) { toast("Parada de emergência ativa"); return; }
+        if (!hasConnectPermission()) { requestBluetoothPermissions(); return; }
+        if (selectedDevice == null) { toast("Selecione o G28"); return; }
+        stopScan();
+        disconnectGattOnly();
+        setStatus("Conectando a " + safeName(selectedDevice) + "...");
+        append("Conectando a " + safeAddress(selectedDevice));
+        gatt = Build.VERSION.SDK_INT >= 23
+                ? selectedDevice.connectGatt(this, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                : selectedDevice.connectGatt(this, false, gattCallback);
+    }
+
+    private void discoverCharacteristics(BluetoothGatt currentGatt) {
+        clearCharacteristics();
+        for (BluetoothGattService service : currentGatt.getServices()) {
+            for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                UUID u = c.getUuid();
+                if (NUS_WRITE_UUID.equals(u)) nusWrite = c;
+                if (NUS_NOTIFY_UUID.equals(u)) nusNotify = c;
+                if (OTA_WRITE_5610_UUID.equals(u)) otaWrite = c;
+                if (OTA_NOTIFY_5610_UUID.equals(u)) otaNotify = c;
+                if (BATTERY_UUID.equals(u)) batteryCharacteristic = c;
+                if (FEATURE_UUID.equals(u)) featureCharacteristic = c;
+            }
+        }
+        append("NUS write=" + uuidOf(nusWrite) + " notify=" + uuidOf(nusNotify));
+        append("OTA5610 service=" + (currentGatt.getService(OTA_SERVICE_5610_UUID) != null)
+                + " write=" + uuidOf(otaWrite) + " notify=" + uuidOf(otaNotify));
+    }
+
+    private void queueNotifications() {
+        notifyQueue.clear();
+        if (nusNotify != null) notifyQueue.add(nusNotify);
+        if (otaNotify != null) notifyQueue.add(otaNotify);
+        configureNextNotification();
+    }
+
+    private void activateOtaNotifications() {
+        if (gatt == null || otaNotify == null) { toast("Characteristic OTA notify não encontrada"); return; }
+        notifyQueue.clear();
+        notifyQueue.add(otaNotify);
