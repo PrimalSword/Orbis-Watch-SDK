@@ -96,6 +96,8 @@ def find_arm_vector_candidates(data: bytes, *, scan_limit: int = 1 << 20) -> tup
     if upper < 0:
         return ()
 
+    # Vector tables usually begin at aligned image/partition boundaries. Scan
+    # 0x100-byte boundaries to avoid producing thousands of weak matches.
     for offset in range(0, upper + 1, 0x100):
         initial_sp = int.from_bytes(data[offset : offset + 4], "little")
         reset_vector = int.from_bytes(data[offset + 4 : offset + 8], "little")
@@ -192,7 +194,9 @@ def write_markdown(report: FirmwareReport, path: str | Path) -> None:
 
     lines.extend(["", "## Printable strings", ""])
     if report.strings:
-        lines.extend(f"- `{value.replace('`', "'")}`" for value in report.strings)
+        for value in report.strings:
+            safe_value = value.replace("`", "'")
+            lines.append(f"- `{safe_value}`")
     else:
         lines.append("No printable ASCII strings found.")
 
