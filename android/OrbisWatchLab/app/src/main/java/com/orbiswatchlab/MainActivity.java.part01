@@ -14,7 +14,8 @@
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 gatt = currentGatt;
                 negotiatedMtu = 23;
-                setStatus("G28 conectado. Descobrindo serviços...");
+                otaNotificationsReady = false;
+                setStatus("G28 conectado. Descobrindo serviços em modo passivo...");
                 if (hasConnectPermission()) {
                     boolean queued = false;
                     try {
@@ -62,12 +63,12 @@
                 return;
             }
             discoverCharacteristics(currentGatt);
-            queueNotifications();
             setStatus(otaWrite != null && otaNotify != null
-                    ? "G28 pronto — canal OTA 5610 encontrado"
-                    : "G28 pronto — OTA 5610 ainda não encontrado");
+                    ? "G28 passivo — canal OTA encontrado, notificações desligadas"
+                    : "G28 passivo — OTA não exposto no modo normal");
             renderOtaStatus();
-            append("MTU mantido em 23 nesta versão para evitar a desconexão observada durante a descoberta.");
+            append("MODO PASSIVO: nenhuma CCCD, notificação, MTU extra ou quadro foi enviado automaticamente.");
+            append("Use os botões manuais para ativar NUS ou OTA somente depois de confirmar estabilidade.");
         }
 
         @Override
