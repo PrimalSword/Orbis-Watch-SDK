@@ -1,0 +1,145 @@
+        if (emergencyStopped || otaWriteBusy) return;
+        if (otaTxQueue.isEmpty()) {
+            Runnable done = otaBatchCompletion;
+            otaBatchCompletion = null;
+            if (done != null) done.run();
+            return;
+        }
+        BluetoothGatt currentGatt = gatt;
+        BluetoothGattCharacteristic c = otaWrite;
+        if (currentGatt == null || c == null || !hasConnectPermission()) {
+            stopTransfer("GATT OTA indisponível");
+            return;
+        }
+        TxItem item = otaTxQueue.removeFirst();
+        append("TX OTA " + hex(item.data));
+        try {
+            otaWriteBusy = true;
+            final long writeToken = ++otaWriteToken;
+            int writeType = (c.getProperties() & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0
+                    ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    : BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE;
+            if (Build.VERSION.SDK_INT >= 33) {
+                int result = currentGatt.writeCharacteristic(c, item.data, writeType);
+                append("OTA write solicitado result=" + result);
+                if (result != BluetoothGatt.GATT_SUCCESS) otaWriteBusy = false;
+            } else {
+                c.setWriteType(writeType);
+                c.setValue(item.data);
+                boolean queued = currentGatt.writeCharacteristic(c);
+                append("OTA write solicitado queued=" + queued);
+                if (!queued) otaWriteBusy = false;
+            }
+            if (!otaWriteBusy) schedule(30, this::pumpOtaQueue);
+            else schedule(2_000, () -> {
+                if (otaWriteBusy && otaWriteToken == writeToken) {
+                    append("Watchdog OTA write: callback ausente; liberando somente a escrita pendente");
+                    otaWriteToken++;
+                    otaWriteBusy = false;
+                    pumpOtaQueue();
+                }
+            });
+        } catch (Exception error) {
+            otaWriteBusy = false;
+            stopTransfer("Falha TX OTA: " + error.getMessage());
+        }
+    }
+
+    private void sendNusFrame(byte[] frame) {
+        if (emergencyStopped || gatt == null || nusWrite == null || !hasConnectPermission()) return;
+        append("TX NUS " + hex(frame));
+        try {
+            if (Build.VERSION.SDK_INT >= 33) gatt.writeCharacteristic(nusWrite, frame, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+            else { nusWrite.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE); nusWrite.setValue(frame); gatt.writeCharacteristic(nusWrite); }
+        } catch (Exception error) { append("Falha NUS: " + error.getMessage()); }
+    }
+
+    private void handleRead(BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+        append("READ " + characteristic.getUuid() + " status=" + status + " data=" + hex(value));
+    }
+
+    private byte[] buildPartitionTable() {
+        byte[] payload = new byte[firmwareParts.size() * 9];
+        for (int i = 0; i < firmwareParts.size(); i++) {
+            FirmwarePart part = firmwareParts.get(i);
+            int offset = i * 9;
+            payload[offset] = (byte) part.mapping;
+            payload[offset + 1] = (byte) (part.address >> 24);
+            payload[offset + 2] = (byte) (part.address >> 16);
+            payload[offset + 3] = (byte) (part.address >> 8);
+            payload[offset + 4] = (byte) part.address;
+            int length = part.length > 0 ? part.length : part.data.length;
+            payload[offset + 5] = (byte) (length >> 24);
+            payload[offset + 6] = (byte) (length >> 16);
+            payload[offset + 7] = (byte) (length >> 8);
+            payload[offset + 8] = (byte) length;
+        }
+        return payload;
+    }
+
+    private static byte[] buildOta5610(int command, int protocolVersion, int block, int fragment, byte[] payload) {
+        if (payload == null) payload = new byte[0];
+        if (payload.length > 255) throw new IllegalArgumentException("Payload OTA maior que 255 bytes");
+        byte[] frame = new byte[9 + payload.length];
+        frame[0] = (byte) 0xD6;
+        frame[1] = (byte) command;
+        frame[2] = (byte) protocolVersion;
+        frame[3] = 0x00;
+        frame[4] = (byte) (block >> 8);
+        frame[5] = (byte) block;
+        frame[6] = (byte) (fragment >> 8);
+        frame[7] = (byte) fragment;
+        frame[8] = (byte) payload.length;
+        System.arraycopy(payload, 0, frame, 9, payload.length);
+        return frame;
+    }
+
+    private static byte[] buildNusFrame(int command, int p0, int p1, int p2, int p3) {
+        byte[] frame = new byte[]{(byte)0xDF, 0, 5, 0, (byte)command, (byte)p0, (byte)p1, (byte)p2, (byte)p3};
+        int checksum = 0;
+        for (int i = 0; i < frame.length; i++) if (i != 3) checksum = (checksum + (frame[i] & 0xFF)) & 0xFF;
+        frame[3] = (byte) checksum;
+        return frame;
+    }
+
+    private int otaPayloadSize() {
+        return Math.max(20, Math.min(240, negotiatedMtu - 14));
+    }
+
+    private int[] blockChecksums(byte[] block) {
+        int even = 0, odd = 0;
+        for (int i = 0; i < block.length; i++) {
+            if ((i & 1) == 0) even += block[i] & 0xFF;
+            else odd += block[i] & 0xFF;
+        }
+        return parityStyle ? new int[]{even, odd} : new int[]{even + odd, 0};
+    }
+
+    private byte[] blockData(FirmwarePart part, int blockIndex) {
+        byte[] block = new byte[4096];
+        int offset = blockIndex * 4096;
+        int length = Math.min(4096, Math.max(0, part.data.length - offset));
+        if (length > 0) System.arraycopy(part.data, offset, block, 0, length);
+        return block;
+    }
+
+    private int blockCount(FirmwarePart part) {
+        return Math.max(1, (int) Math.ceil(part.data.length / 4096.0));
+    }
+
+    private FirmwarePart currentPart() { return firmwareParts.get(transferPartIndex); }
+
+    private int estimateFrames(TransferMode mode) {
+        if (mode == TransferMode.TABLE_ONLY) return 1;
+        if (mode == TransferMode.FIRST_BLOCK) return 1 + 1 + (int)Math.ceil(4096.0 / otaPayloadSize()) + 1;
+        int total = 1 + 1;
+        for (FirmwarePart part : firmwareParts) {
+            int blocks = blockCount(part);
+            total += (int)Math.ceil(blocks / 10.0);
+            total += blocks * ((int)Math.ceil(4096.0 / otaPayloadSize()) + 1);
+            total += 1;
+        }
+        return total;
+    }
+
+    private String validatePackage(boolean tableOnly) {
