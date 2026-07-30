@@ -1,6 +1,3 @@
-            devices.put(safeAddress(device), new DeviceEntry(device, name == null ? "(sem nome)" : name, result.getRssi()));
-            runOnUiThread(MainActivity.this::renderDevices);
-        }
 
         @Override
         public void onScanFailed(int errorCode) {
