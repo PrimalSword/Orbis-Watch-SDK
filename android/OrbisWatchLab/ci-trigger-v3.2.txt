@@ -1,0 +1,1 @@
+Validate passive GATT build v3.2.
