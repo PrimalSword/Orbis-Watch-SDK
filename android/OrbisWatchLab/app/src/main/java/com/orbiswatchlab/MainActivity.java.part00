@@ -1,0 +1,159 @@
+package com.orbiswatchlab;
+
+import android.Manifest;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.OpenableColumns;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+public final class MainActivity extends Activity {
+    private static final int REQUEST_PERMISSIONS = 1001;
+    private static final int REQUEST_PACKAGE = 1002;
+
+    private static final UUID NUS_SERVICE_UUID = uuid("6e400001-b5a3-f393-e0a9-e50e24dcca9f");
+    private static final UUID NUS_WRITE_UUID = uuid("6e400002-b5a3-f393-e0a9-e50e24dcca9f");
+    private static final UUID NUS_NOTIFY_UUID = uuid("6e400003-b5a3-f393-e0a9-e50e24dcca9f");
+
+    // Recovered from HryFine's Cus5610 OTA implementation.
+    private static final UUID OTA_SERVICE_5610_UUID = uuid("6e40ff01-b5a3-f393-e0a9-e50e24dcca9e");
+    private static final UUID OTA_WRITE_5610_UUID = uuid("6e40ff02-b5a3-f393-e0a9-e50e24dcca9e");
+    private static final UUID OTA_NOTIFY_5610_UUID = uuid("6e40ff03-b5a3-f393-e0a9-e50e24dcca9e");
+
+    private static final UUID CCCD_UUID = uuid("00002902-0000-1000-8000-00805f9b34fb");
+    private static final UUID BATTERY_UUID = uuid("00002a19-0000-1000-8000-00805f9b34fb");
+    private static final UUID FEATURE_UUID = uuid("00002a28-0000-1000-8000-00805f9b34fb");
+
+    private static final String OTA_ENDPOINT = "https://ota.lianhezhuli.com/api/hry/get_update";
+    private static final String OTA_APP_KEY = "oaa648257e8";
+    private static final String OTA_SECRET = "ead8ff5fe2f9385b55e6e509cf311a35";
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private final List<Runnable> pendingTasks = new ArrayList<>();
+    private final Map<String, DeviceEntry> devices = new LinkedHashMap<>();
+    private final ArrayDeque<BluetoothGattCharacteristic> notifyQueue = new ArrayDeque<>();
+    private final ArrayDeque<TxItem> otaTxQueue = new ArrayDeque<>();
+    private final List<FirmwarePart> firmwareParts = new ArrayList<>();
+    private final SimpleDateFormat clock = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
+
+    private BluetoothAdapter adapter;
+    private BluetoothLeScanner scanner;
+    private BluetoothGatt gatt;
+    private BluetoothGattCharacteristic nusWrite;
+    private BluetoothGattCharacteristic nusNotify;
+    private BluetoothGattCharacteristic otaWrite;
+    private BluetoothGattCharacteristic otaNotify;
+    private BluetoothGattCharacteristic batteryCharacteristic;
+    private BluetoothGattCharacteristic featureCharacteristic;
+    private BluetoothDevice selectedDevice;
+
+    private TextView statusView;
+    private TextView logView;
+    private TextView otaView;
+    private TextView packageView;
+    private TextView transferView;
+    private RadioGroup deviceGroup;
+    private EditText mappingInput;
+    private EditText addressInput;
+    private EditText riskInput;
+    private EditText jsonInput;
+
+    private boolean scanning;
+    private boolean emergencyStopped;
+    private boolean experimentRunning;
+    private volatile boolean otaWriteBusy;
+    private volatile long otaWriteToken;
+    private boolean otaNotificationsReady;
+    private boolean parityStyle;
+    private boolean riskArmed;
+    private int negotiatedMtu = 23;
+    private Runnable otaBatchCompletion;
+    private byte[] otaRxBuffer = new byte[0];
+    private int otaExpectedLength;
+    private String otaUniqueCode = "";
+    private String otaVersion = "";
+    private String otaProject = "";
+
+    private TransferMode transferMode = TransferMode.NONE;
+    private TransferStage transferStage = TransferStage.IDLE;
+    private int transferPartIndex;
+    private int transferBlockIndex;
+    private int transferGroupStart;
+    private int transferGroupCount;
+    private int transferTotalFrames;
+    private int transferSentFrames;
+
+    private final ScanCallback scanCallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            BluetoothDevice device = result.getDevice();
+            String name = safeName(device);
+            if ((name == null || name.equals("(sem nome)")) && result.getScanRecord() != null) {
+                String advertised = result.getScanRecord().getDeviceName();
+                if (advertised != null && !advertised.trim().isEmpty()) name = advertised;
+            }
+            devices.put(safeAddress(device), new DeviceEntry(device, name == null ? "(sem nome)" : name, result.getRssi()));
+            runOnUiThread(MainActivity.this::renderDevices);
+        }
