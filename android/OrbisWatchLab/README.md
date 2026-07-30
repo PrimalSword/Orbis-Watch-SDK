@@ -13,3 +13,5 @@ Android BLE laboratory for the G28 / HryFine-compatible watch already validated 
 - does not expose OTA, reset, factory restore, flash-read, or bulk-transfer commands.
 
 The emergency stop cannot retract a BLE frame that was already delivered to the watch. It prevents subsequent app operations and disconnects immediately.
+
+This branch exists only to validate the Android build in GitHub Actions.
