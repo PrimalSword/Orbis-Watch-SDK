@@ -296,16 +296,8 @@ official_builder='''    /** Exact reconstruction of Cus5610CommandUtils.generalS
 '''
 src=src[:insert_at]+official_builder+src[insert_at:]
 
-old='''    private void handleRead(BluetoothGattCharacteristic characteristic, byte[] value, int status) {
-        byte[] copy = value == null ? new byte[0] : value.clone();
-        append("READ " + characteristic.getUuid() + " status=" + status + " data=" + hex(copy)
-                + " ASCII=\"" + printableAscii(copy) + "\"");
-        if (status == BluetoothGatt.GATT_SUCCESS && copy.length > 0 && (copy[0] & 0xFF) == 0xD6) {
-            append("  ↳ leitura contém cabeçalho D6; encaminhando ao parser OTA.");
-            consumeOtaNotification(copy);
-        }
-    }
-'''
+handle_read_start = src.index('    private void handleRead(BluetoothGattCharacteristic characteristic, byte[] value, int status) {')
+handle_read_end = src.index('    private byte[] buildPartitionTable()', handle_read_start)
 new='''    private void handleRead(BluetoothGattCharacteristic characteristic, byte[] value, int status) {
         byte[] copy = value == null ? new byte[0] : value.clone();
         append("READ " + characteristic.getUuid() + " status=" + status + " data=" + hex(copy)
@@ -326,9 +318,9 @@ new='''    private void handleRead(BluetoothGattCharacteristic characteristic, b
             });
         }
     }
+
 '''
-assert old in src
-src=src.replace(old,new)
+src = src[:handle_read_start] + new + src[handle_read_end:]
 
 needle='''        nusRxBuffer = new byte[0];
         nusExpectedLength = 0;
