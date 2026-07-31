@@ -25,18 +25,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble v3.6 NUS OTA transition source
+      - name: Assemble v3.7 official appid server source
         run: |
           cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
             | tr -d '\n\r' \
             | base64 -d \
             | gzip -dc \
             > android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/patch_v37_server_appid.py \
+            android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Orbis Watch OTA 5610 v3.6" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Orbis Watch OTA 5610 v3.7" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q 'params.put("appid", OTA_APP_KEY)' android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          ! grep -q 'String\[\] keyNames = {"app_key", "app_id"}' android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "GeneralUtils.requestOTAInfo()" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "GeneralUtils.requestStartOTA()" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "buildNusCommand" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "MODO OTA 5610 CONFIRMADO" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
 
       - name: Set up Java 17
@@ -57,24 +60,24 @@ jobs:
         run: |
           mkdir -p dist/source
           cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk \
-             dist/Orbis-Watch-OTA-5610-v3.6.apk
+             dist/Orbis-Watch-OTA-5610-v3.7.apk
           cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
           cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
           cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
-          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.6-source.zip .
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.7-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.6
-          path: dist/Orbis-Watch-OTA-5610-v3.6.apk
+          name: Orbis-Watch-OTA-5610-v3.7
+          path: dist/Orbis-Watch-OTA-5610-v3.7.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.6-source
-          path: dist/Orbis-Watch-OTA-5610-v3.6-source.zip
+          name: Orbis-Watch-OTA-5610-v3.7-source
+          path: dist/Orbis-Watch-OTA-5610-v3.7-source.zip
           if-no-files-found: error
           retention-days: 30
