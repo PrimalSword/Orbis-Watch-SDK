@@ -45,8 +45,11 @@ jobs:
       - name: Decompile authentication classes
         run: |
           set -euxo pipefail
+          # JADX can return 1 when unrelated obfuscated classes fail, while still
+          # writing the target classes successfully. Preserve that usable output.
           work/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 \
-            -d work/decoded work/HryFine.apk
+            -d work/decoded work/HryFine.apk || true
+          test -d work/decoded/sources
           mkdir -p work/auth
           find work/decoded/sources -type f \( \
             -name 'Constans.java' -o \
@@ -60,6 +63,7 @@ jobs:
             work/decoded/sources/com/lianhezhuli/hyfit \
             > work/auth/search-results.txt || true
           test -s work/auth/search-results.txt
+          find work/auth -type f -maxdepth 20 -print
 
       - name: Package extracted source
         run: |
