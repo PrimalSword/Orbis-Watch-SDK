@@ -54,13 +54,17 @@ jobs:
           find work/decoded/sources -type f \( \
             -name 'Constans.java' -o \
             -name 'SignUtils.java' -o \
+            -name 'StringUtils.java' -o \
+            -name 'PhoneDeviceUtil.java' -o \
+            -name 'Q6.java' -o \
+            -name 'C2842e4.java' -o \
             -name 'DeviceOtaActivity.java' -o \
             -name 'NetWorkRequest.java' -o \
             -name 'Request.java' -o \
             -name 'NetWorkManager.java' \
           \) -print -exec cp --parents '{}' work/auth/ \;
-          grep -RniE 'getQueryMap|random|nonce|appid|getSign|get_update|unique_code' \
-            work/decoded/sources/com/lianhezhuli/hyfit \
+          grep -RniE 'getQueryMap|random|nonce|timestamp|bundle_id|appid|getSign|get_update|unique_code' \
+            work/decoded/sources/com/lianhezhuli/hyfit work/decoded/sources/com/ironsource \
             > work/auth/search-results.txt || true
           test -s work/auth/search-results.txt
           find work/auth -type f -maxdepth 20 -print
