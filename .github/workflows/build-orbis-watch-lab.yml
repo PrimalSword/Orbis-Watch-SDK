@@ -33,9 +33,12 @@ jobs:
           done
           python android/OrbisWatchLab/tools/patch_v35.py \
             android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/fix_v35_java_quotes.py \
+            android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "Orbis Watch OTA 5610 v3.5" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "buildOfficial5610Request" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          ! grep -q 'ASCII=""' android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
