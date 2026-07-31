@@ -1,0 +1,75 @@
+name: Extract HryFine auth flow
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/extract-hryfine-auth.yml"
+      - "tools/hryfine-auth/**"
+
+permissions:
+  contents: read
+
+jobs:
+  extract-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download official-signed HryFine APK
+        run: |
+          set -euxo pipefail
+          mkdir -p work
+          curl -fL --retry 4 --retry-delay 3 \
+            -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
+            'https://d.apkpure.net/b/APK/com.lianhezhuli.hyfit?version=latest' \
+            -o work/HryFine.apk
+          test -s work/HryFine.apk
+          file work/HryFine.apk
+          unzip -t work/HryFine.apk >/dev/null
+          sha256sum work/HryFine.apk | tee work/HryFine.sha256
+
+      - name: Download JADX
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 4 \
+            'https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip' \
+            -o work/jadx.zip
+          unzip -q work/jadx.zip -d work/jadx
+          chmod +x work/jadx/bin/jadx
+
+      - name: Decompile authentication classes
+        run: |
+          set -euxo pipefail
+          work/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 \
+            -d work/decoded work/HryFine.apk
+          mkdir -p work/auth
+          find work/decoded/sources -type f \( \
+            -name 'Constans.java' -o \
+            -name 'SignUtils.java' -o \
+            -name 'DeviceOtaActivity.java' -o \
+            -name 'NetWorkRequest.java' -o \
+            -name 'Request.java' -o \
+            -name 'NetWorkManager.java' \
+          \) -print -exec cp --parents '{}' work/auth/ \;
+          grep -RniE 'getQueryMap|random|nonce|appid|getSign|get_update|unique_code' \
+            work/decoded/sources/com/lianhezhuli/hyfit \
+            > work/auth/search-results.txt || true
+          test -s work/auth/search-results.txt
+
+      - name: Package extracted source
+        run: |
+          cd work
+          zip -qr HryFine-auth-extraction.zip auth HryFine.sha256
+
+      - name: Upload authentication extraction
+        uses: actions/upload-artifact@v4
+        with:
+          name: HryFine-auth-extraction
+          path: work/HryFine-auth-extraction.zip
+          if-no-files-found: error
+          retention-days: 7
