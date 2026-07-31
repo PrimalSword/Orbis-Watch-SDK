@@ -25,20 +25,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble v3.4 base and apply v3.5 D5 patch
+      - name: Assemble v3.8 source
         run: |
-          : > android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          for f in android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v34/MainActivity.java.v34.part*.b64; do
-            base64 -d "$f" >> android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          done
-          python android/OrbisWatchLab/tools/patch_v35.py \
+          cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
+            | tr -d '\n\r' \
+            | base64 -d \
+            | gzip -dc \
+            > android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/patch_v37_server_appid.py \
             android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          python android/OrbisWatchLab/tools/fix_v35_java_quotes.py \
+          python android/OrbisWatchLab/tools/patch_v38_exact_auth.py \
             android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Orbis Watch OTA 5610 v3.5" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "buildOfficial5610Request" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          ! grep -q 'ASCII=""' android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Orbis Watch OTA 5610 v3.8" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "buildOfficialServerParams" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "GeneralUtils.requestOTAInfo()" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "GeneralUtils.requestStartOTA()" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "MODO OTA 5610 CONFIRMADO" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -57,25 +60,24 @@ jobs:
       - name: Package outputs
         run: |
           mkdir -p dist/source
-          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk \
-             dist/Orbis-Watch-OTA-5610-v3.5.apk
+          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.8.apk
           cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
           cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
           cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
-          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.5-source.zip .
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.8-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.5
-          path: dist/Orbis-Watch-OTA-5610-v3.5.apk
+          name: Orbis-Watch-OTA-5610-v3.8
+          path: dist/Orbis-Watch-OTA-5610-v3.8.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.5-source
-          path: dist/Orbis-Watch-OTA-5610-v3.5-source.zip
+          name: Orbis-Watch-OTA-5610-v3.8-source
+          path: dist/Orbis-Watch-OTA-5610-v3.8-source.zip
           if-no-files-found: error
           retention-days: 30
