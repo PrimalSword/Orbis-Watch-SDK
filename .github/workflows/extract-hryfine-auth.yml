@@ -96,6 +96,12 @@ jobs:
           test -s work/ota/ota-context.txt
           find work/ota -type f -maxdepth 30 -print | sort
 
+      - name: Probe bounded G28 metadata matrix
+        run: |
+          set -euxo pipefail
+          python tools/hryfine-auth/probe_ota_metadata.py
+          test -s work/ota/metadata-probe.json
+
       - name: Package extracted source
         run: |
           cd work
