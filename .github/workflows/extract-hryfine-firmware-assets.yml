@@ -1,0 +1,137 @@
+name: Inspect HryFine firmware assets
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/extract-hryfine-firmware-assets.yml"
+      - "tools/hryfine-firmware/**"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download official-signed HryFine APK
+        run: |
+          set -euxo pipefail
+          mkdir -p work/apk work/report work/candidates
+          curl -fL --retry 4 --retry-delay 3 \
+            -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
+            'https://d.apkpure.net/b/APK/com.lianhezhuli.hyfit?version=latest' \
+            -o work/HryFine.apk
+          unzip -t work/HryFine.apk >/dev/null
+          sha256sum work/HryFine.apk | tee work/report/HryFine.sha256
+          unzip -l work/HryFine.apk > work/report/apk-file-list.txt
+          unzip -q work/HryFine.apk -d work/apk
+
+      - name: Locate firmware-like packaged files
+        run: |
+          set -euxo pipefail
+
+          find work/apk -type f \
+            | grep -Ei '/(assets|res/raw|res/xml|lib)/|\.(bin|fw|img|hex|dcf|dat|pack|zip|gz)$' \
+            | sort > work/report/packaged-candidates.txt || true
+
+          find work/apk -type f \( \
+              -iname '*ota*' -o \
+              -iname '*firmware*' -o \
+              -iname '*5610*' -o \
+              -iname '*g28*' -o \
+              -iname '*.bin' -o \
+              -iname '*.dcf' -o \
+              -iname '*.fw' -o \
+              -iname '*.img' \
+            \) -print0 \
+            | while IFS= read -r -d '' file; do
+                rel="${file#work/apk/}"
+                mkdir -p "work/candidates/$(dirname "$rel")"
+                cp "$file" "work/candidates/$rel"
+              done
+
+          find work/candidates -type f -print | sort > work/report/copied-candidates.txt
+          find work/candidates -type f -exec file '{}' \; > work/report/candidate-file-types.txt || true
+          find work/candidates -type f -exec sha256sum '{}' \; > work/report/candidate-sha256.txt || true
+
+      - name: Search DEX native libraries and resources
+        run: |
+          set -euxo pipefail
+          : > work/report/string-hits.txt
+          : > work/report/url-hits.txt
+
+          find work/apk -type f \( -name 'classes*.dex' -o -name '*.so' -o -name 'resources.arsc' \) -print0 \
+            | while IFS= read -r -d '' file; do
+                echo "===== $file =====" >> work/report/string-hits.txt
+                strings -a -n 5 "$file" \
+                  | grep -Ei \
+                    'E06B_G28|6800A4B0|(^|[^A-Z0-9])G28([^A-Z0-9]|$)|Cus5610|5610OTA|bin_file|part_addr|part_len|unique_code|ota\.lianhezhuli|firmware|\.bin([^A-Za-z0-9]|$)|\.dcf([^A-Za-z0-9]|$)' \
+                  | sort -u >> work/report/string-hits.txt || true
+                strings -a -n 8 "$file" \
+                  | grep -Eo 'https?://[^[:space:]"<>]+' \
+                  | grep -Ei 'ota|firmware|bin|download|upgrade' \
+                  | sort -u >> work/report/url-hits.txt || true
+              done
+
+          grep -aRniE \
+            'E06B_G28|6800A4B0|G28|Cus5610|bin_file|part_addr|part_len|ota\.lianhezhuli|firmware|\.bin' \
+            work/apk/assets work/apk/res 2>/dev/null \
+            > work/report/resource-content-hits.txt || true
+
+      - name: Classify large opaque assets
+        run: |
+          set -euxo pipefail
+          find work/apk/assets work/apk/res/raw -type f -size +4096c 2>/dev/null \
+            | sort > work/report/large-assets.txt || true
+          : > work/report/large-asset-analysis.txt
+          while IFS= read -r file; do
+            test -n "$file" || continue
+            echo "===== $file =====" >> work/report/large-asset-analysis.txt
+            stat --printf='size=%s\n' "$file" >> work/report/large-asset-analysis.txt
+            file "$file" >> work/report/large-asset-analysis.txt
+            sha256sum "$file" >> work/report/large-asset-analysis.txt
+            xxd -l 64 -g 1 "$file" >> work/report/large-asset-analysis.txt
+          done < work/report/large-assets.txt
+
+      - name: Write inspection summary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          root = Path('work')
+          copied = [line for line in (root/'report/copied-candidates.txt').read_text(errors='replace').splitlines() if line]
+          strings = [line for line in (root/'report/string-hits.txt').read_text(errors='replace').splitlines() if line and not line.startswith('=====')]
+          urls = [line for line in (root/'report/url-hits.txt').read_text(errors='replace').splitlines() if line]
+          summary = {
+              'read_only': True,
+              'apk_embedded_candidate_count': len(copied),
+              'unique_relevant_string_count': len(set(strings)),
+              'unique_relevant_url_count': len(set(urls)),
+              'g28_exact_hit': any('E06B_G28' in line or '6800A4B0' in line for line in strings),
+              'firmware_downloaded': False,
+              'notes': 'Candidate files are copied only when their APK path or extension is firmware/OTA-like. No BLE operation is performed.',
+          }
+          (root/'report/summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Package reports and candidates
+        run: |
+          cd work
+          zip -qr HryFine-firmware-assets-inspection.zip report candidates
+
+      - name: Upload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: HryFine-firmware-assets-inspection
+          path: work/HryFine-firmware-assets-inspection.zip
+          if-no-files-found: error
+          retention-days: 7
