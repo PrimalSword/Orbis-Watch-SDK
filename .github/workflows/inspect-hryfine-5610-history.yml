@@ -1,0 +1,146 @@
+name: Inspect HryFine 5610 history
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/inspect-hryfine-5610-history.yml"
+      - "tools/hryfine-history/**"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve historical APKs
+        run: |
+          set -euxo pipefail
+          python tools/hryfine-history/resolve_apks.py work/history
+          test -s work/history/resolve-report.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download JADX
+        run: |
+          set -euxo pipefail
+          mkdir -p work/jadx
+          curl -fL --retry 4 \
+            'https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip' \
+            -o work/jadx.zip
+          unzip -q work/jadx.zip -d work/jadx
+          chmod +x work/jadx/bin/jadx
+
+      - name: Identify and decompile resolved APKs
+        run: |
+          set -euxo pipefail
+          mkdir -p work/report work/extracted
+          AAPT="$(find "${ANDROID_HOME:-/opt/android-sdk}" -type f -path '*/build-tools/*/aapt' 2>/dev/null | sort -V | tail -1 || true)"
+          if test -z "$AAPT"; then
+            AAPT="$(command -v aapt || true)"
+          fi
+          : > work/report/apk-identities.txt
+
+          for apk in work/history/HryFine-*.apk; do
+            test -f "$apk" || continue
+            name="$(basename "$apk" .apk)"
+            echo "===== $name =====" | tee -a work/report/apk-identities.txt
+            sha256sum "$apk" | tee -a work/report/apk-identities.txt
+            file "$apk" | tee -a work/report/apk-identities.txt
+            if test -n "$AAPT"; then
+              "$AAPT" dump badging "$apk" | head -5 | tee -a work/report/apk-identities.txt
+            fi
+            work/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 \
+              -d "work/extracted/$name" "$apk" || true
+          done
+
+      - name: Compare 5610 OTA implementations
+        run: |
+          set -euxo pipefail
+          : > work/report/ota-history-hits.txt
+          : > work/report/ota-history-summary.txt
+
+          for root in work/extracted/HryFine-*; do
+            test -d "$root" || continue
+            name="$(basename "$root")"
+            echo "===== $name =====" | tee -a work/report/ota-history-summary.txt
+            grep -RniE \
+              'Cus5610|5610OTA|6e40ff01|requestOTAInfo|requestStartOTA|ota\.lianhezhuli|api/hry/get_update|api/hry/force_update|unique_code|bin_file|part_addr|part_len|ead8ff5fe2f9385b55e6e509cf311a35|oaa648257e8' \
+              "$root/sources" \
+              > "work/report/${name}-hits.txt" || true
+            cat "work/report/${name}-hits.txt" >> work/report/ota-history-hits.txt
+
+            printf 'Cus5610 files: ' >> work/report/ota-history-summary.txt
+            find "$root/sources" -type f -iname '*5610*' | wc -l >> work/report/ota-history-summary.txt
+            printf 'get_update endpoints: ' >> work/report/ota-history-summary.txt
+            grep -RhoE 'https://[^" ]+/api/hry/get_update' "$root/sources" 2>/dev/null | sort -u | tr '\n' ' ' >> work/report/ota-history-summary.txt || true
+            echo >> work/report/ota-history-summary.txt
+            printf 'OTA appids: ' >> work/report/ota-history-summary.txt
+            grep -RhoE 'oa[a-zA-Z0-9]{8,}' "$root/sources" 2>/dev/null | sort -u | tr '\n' ' ' >> work/report/ota-history-summary.txt || true
+            echo >> work/report/ota-history-summary.txt
+            printf '32-char candidate secrets near OTA: ' >> work/report/ota-history-summary.txt
+            grep -RhoE '[a-fA-F0-9]{32}' "$root/sources" 2>/dev/null | sort -u | head -30 | tr '\n' ' ' >> work/report/ota-history-summary.txt || true
+            echo >> work/report/ota-history-summary.txt
+
+            find "$root/sources" -type f \( \
+              -iname '*5610*.java' -o \
+              -name 'Request.java' -o \
+              -name 'RequestUtils.java' -o \
+              -name 'GeneralUtils.java' -o \
+              -name 'Constans.java' -o \
+              -name 'SignUtils.java' \
+            \) -print0 | while IFS= read -r -d '' file; do
+              rel="${file#$root/sources/}"
+              dest="work/report/source/$name/$rel"
+              mkdir -p "$(dirname "$dest")"
+              cp "$file" "$dest"
+            done
+          done
+
+          cat work/report/ota-history-summary.txt
+
+      - name: Write machine-readable result
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+
+          root = Path('work')
+          identities = (root/'report/apk-identities.txt').read_text(errors='replace') if (root/'report/apk-identities.txt').exists() else ''
+          summary = (root/'report/ota-history-summary.txt').read_text(errors='replace') if (root/'report/ota-history-summary.txt').exists() else ''
+          result = {
+              'read_only': True,
+              'resolved_apk_count': len(list((root/'history').glob('HryFine-*.apk'))),
+              'resolved_requested_3_5_2': bool(re.search(r"versionName='3\\.5\\.2'", identities)),
+              'resolved_requested_3_7_0': bool(re.search(r"versionName='3\\.7\\.0'", identities)),
+              'contains_5610_implementation': 'Cus5610 files: 0' not in summary if 'Cus5610 files:' in summary else False,
+              'firmware_downloaded': False,
+              'ble_operation_performed': False,
+          }
+          (root/'report/result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Package historical comparison
+        run: |
+          cd work
+          zip -qr HryFine-5610-history.zip report history/resolve-report.json history/pages
+
+      - name: Upload historical comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: HryFine-5610-history
+          path: work/HryFine-5610-history.zip
+          if-no-files-found: error
+          retention-days: 7
