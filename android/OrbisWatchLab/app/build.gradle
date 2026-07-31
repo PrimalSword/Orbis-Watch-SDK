@@ -10,8 +10,8 @@ android {
         applicationId "com.orbiswatchlab"
         minSdk 21
         targetSdk 35
-        versionCode 11
-        versionName "3.7-server-appid"
+        versionCode 12
+        versionName "3.8-exact-auth-map"
     }
 
     buildTypes {
