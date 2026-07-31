@@ -10,8 +10,8 @@ android {
         applicationId "com.orbiswatchlab"
         minSdk 21
         targetSdk 35
-        versionCode 8
-        versionName "3.4-candidate-channels"
+        versionCode 9
+        versionName "3.5-official-d5-probe"
     }
 
     buildTypes {
