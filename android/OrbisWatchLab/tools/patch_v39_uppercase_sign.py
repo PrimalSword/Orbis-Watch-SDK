@@ -35,10 +35,17 @@ if count != 2:
     raise SystemExit(f'expected 2 auth-map log sites, found {count}')
 src = src.replace(needle, replacement)
 
-if '.toLowerCase(Locale.US);' in src[src.find('private static String sign('):]:
-    raise SystemExit('lowercase signature conversion remains')
-if '.toUpperCase(Locale.US);' not in src[src.find('private static String sign('):]:
-    raise SystemExit('uppercase signature conversion missing')
+sign_start = src.find('    private static String sign(Map<String, String> params) throws Exception {')
+if sign_start < 0:
+    raise SystemExit('sign method not found')
+sign_end = src.find('\n    }', sign_start)
+if sign_end < 0:
+    raise SystemExit('sign method end not found')
+sign_body = src[sign_start:sign_end]
+if '.toLowerCase(Locale.US);' in sign_body:
+    raise SystemExit('lowercase signature conversion remains in sign method')
+if '.toUpperCase(Locale.US);' not in sign_body:
+    raise SystemExit('uppercase signature conversion missing in sign method')
 
 path.write_text(src, encoding='utf-8')
 print('v3.9 uppercase HryFine signature patch applied')
