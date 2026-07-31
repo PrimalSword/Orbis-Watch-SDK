@@ -1,4 +1,4 @@
-name: Extract HryFine auth flow
+name: Extract HryFine OTA flow
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   extract-auth:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -42,42 +42,75 @@ jobs:
           unzip -q work/jadx.zip -d work/jadx
           chmod +x work/jadx/bin/jadx
 
-      - name: Decompile authentication classes
+      - name: Decompile OTA and authentication classes
         run: |
           set -euxo pipefail
-          # JADX can return 1 when unrelated obfuscated classes fail, while still
-          # writing the target classes successfully. Preserve that usable output.
           work/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 \
             -d work/decoded work/HryFine.apk || true
           test -d work/decoded/sources
-          mkdir -p work/auth
+          mkdir -p work/ota
+
           find work/decoded/sources -type f \( \
             -name 'Constans.java' -o \
             -name 'SignUtils.java' -o \
             -name 'StringUtils.java' -o \
             -name 'PhoneDeviceUtil.java' -o \
-            -name 'Q6.java' -o \
-            -name 'C2842e4.java' -o \
-            -name 'DeviceOtaActivity.java' -o \
-            -name 'NetWorkRequest.java' -o \
+            -name 'GeneralUtils.java' -o \
+            -name 'AppUpdateUtils.java' -o \
             -name 'Request.java' -o \
-            -name 'NetWorkManager.java' \
-          \) -print -exec cp --parents '{}' work/auth/ \;
-          grep -RniE 'getQueryMap|random|nonce|timestamp|bundle_id|appid|getSign|get_update|unique_code' \
-            work/decoded/sources/com/lianhezhuli/hyfit work/decoded/sources/com/ironsource \
-            > work/auth/search-results.txt || true
-          test -s work/auth/search-results.txt
-          find work/auth -type f -maxdepth 20 -print
+            -name 'RequestUtils.java' -o \
+            -name 'NetWorkRequest.java' -o \
+            -name 'NetWorkManager.java' -o \
+            -name 'DeviceOtaActivity.java' -o \
+            -iname '*Ota*.java' -o \
+            -iname '*OTA*.java' \
+          \) -print -exec cp --parents '{}' work/ota/ \;
+
+          grep -RlE \
+            'ead8ff5fe2f9385b55e6e509cf311a35|unique_code|getDeviceOta|getDeviceOTA|requestOTAInfo|requestStartOTA' \
+            work/decoded/sources/com/lianhezhuli/hyfit \
+            | while IFS= read -r file; do
+                cp --parents "$file" work/ota/
+              done
+
+          grep -RniE \
+            'getQueryMap|random|nonce|timestamp|bundle_id|appid|getSign|get_update|unique_code|requestOTAInfo|requestStartOTA|bin_list|firmware|device_ota|ota/' \
+            work/decoded/sources/com/lianhezhuli/hyfit \
+            > work/ota/search-results.txt || true
+
+          for file in \
+            work/decoded/sources/com/lianhezhuli/hyfit/network/request/RequestUtils.java \
+            work/decoded/sources/com/lianhezhuli/hyfit/network/request/Request.java \
+            work/decoded/sources/com/lianhezhuli/hyfit/utils/AppUpdateUtils.java; do
+            if test -f "$file"; then
+              {
+                echo "===== $file ====="
+                grep -nC 70 -E \
+                  'ead8ff5fe2f9385b55e6e509cf311a35|unique_code|get_update|OTA|Ota|ota|bin_list' \
+                  "$file" || true
+              } >> work/ota/ota-context.txt
+            fi
+          done
+
+          test -s work/ota/search-results.txt
+          test -s work/ota/ota-context.txt
+          find work/ota -type f -maxdepth 30 -print | sort
+
+      - name: Probe bounded G28 metadata matrix
+        run: |
+          set -euxo pipefail
+          python tools/hryfine-auth/probe_ota_metadata.py
+          test -s work/ota/metadata-probe.json
 
       - name: Package extracted source
         run: |
           cd work
-          zip -qr HryFine-auth-extraction.zip auth HryFine.sha256
+          zip -qr HryFine-ota-extraction.zip ota HryFine.sha256
 
-      - name: Upload authentication extraction
+      - name: Upload OTA extraction
         uses: actions/upload-artifact@v4
         with:
-          name: HryFine-auth-extraction
-          path: work/HryFine-auth-extraction.zip
+          name: HryFine-ota-extraction
+          path: work/HryFine-ota-extraction.zip
           if-no-files-found: error
           retention-days: 7
