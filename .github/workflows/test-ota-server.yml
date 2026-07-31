@@ -1,0 +1,43 @@
+name: Test OTA Server
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "ota_server/**"
+      - ".github/workflows/test-ota-server.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "ota_server/**"
+      - ".github/workflows/test-ota-server.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ota_server/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r ota_server/requirements.txt
+
+      - name: Run safety tests
+        run: python -m pytest -q ota_server/tests
+
+      - name: Compile server
+        run: python -m py_compile ota_server/server.py
+
+      - name: Build container
+        run: docker build -t orbis-watch-ota:test ota_server

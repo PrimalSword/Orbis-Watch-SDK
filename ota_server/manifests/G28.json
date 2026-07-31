@@ -1,0 +1,13 @@
+{
+  "project": "G28",
+  "releases": [
+    {
+      "project": "G28",
+      "version": "V1.6-custom",
+      "filename": "G28_V1.6-custom.bin",
+      "enabled": false,
+      "notes": "Placeholder only. Enable exclusively after obtaining and validating a genuine G28 firmware image and the complete 5610 transfer flow.",
+      "signature_required": null
+    }
+  ]
+}
