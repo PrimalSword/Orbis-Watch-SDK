@@ -88,7 +88,12 @@
             return;
         }
         if (copy.length >= 5 && ((copy[0] & 0xFF) == 0xDF || (copy[0] & 0xFF) == 0xFD)) {
-            append(String.format(Locale.US, "  ↳ NUS %02X comando=0x%02X ASCII=\"%s\"", copy[0] & 0xFF, copy[4] & 0xFF, printableAscii(copy)));
+            int command = copy[4] & 0xFF;
+            append(String.format(Locale.US, "  ↳ NUS %02X comando=0x%02X ASCII=\"%s\"", copy[0] & 0xFF, command, printableAscii(copy)));
+            if (command == 0xF3) {
+                setStatus("G28 conectado e validado pelo protocolo NUS");
+                append("LINK VALIDADO: resposta DEVICE_INFO 0xF3 recebida. Agora o estado exibido corresponde a uma sessão funcional.");
+            }
         }
     }
 
