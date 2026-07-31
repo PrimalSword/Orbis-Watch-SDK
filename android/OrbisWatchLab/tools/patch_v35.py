@@ -153,18 +153,8 @@ new_probe='''    private void confirmCandidateProbe(BluetoothGattCharacteristic 
 '''
 src=src[:m.start()]+new_probe+src[m.end():]
 
-old='''        boolean directOta = otaNotify != null && otaNotify.getUuid().equals(characteristic.getUuid());
-        boolean candidate = (ff14Notify != null && ff14Notify.getUuid().equals(characteristic.getUuid()))
-                || (ff01Notify != null && ff01Notify.getUuid().equals(characteristic.getUuid()));
-        if (directOta || candidate) {
-            if (candidate) append("  ↳ resposta em canal proprietário candidato");
-            if (copy.length > 0 && ((copy[0] & 0xFF) == 0xD6 || otaRxBuffer.length > 0)) {
-                consumeOtaNotification(copy);
-            } else {
-                append("  ↳ dados não-D6: ASCII=\"" + printableAscii(copy) + "\"");
-            }
-        }
-'''
+candidate_start = src.index('        boolean directOta = otaNotify != null && otaNotify.getUuid().equals(characteristic.getUuid());')
+candidate_end = src.index('    }\n\n    private void consumeNusNotification', candidate_start)
 new='''        boolean directOta = otaNotify != null && otaNotify.getUuid().equals(characteristic.getUuid());
         boolean fromFf01 = ff01Notify != null && ff01Notify.getUuid().equals(characteristic.getUuid());
         boolean fromFf14 = ff14Notify != null && ff14Notify.getUuid().equals(characteristic.getUuid());
@@ -185,8 +175,7 @@ new='''        boolean directOta = otaNotify != null && otaNotify.getUuid().equa
             }
         }
 '''
-assert old in src
-src=src.replace(old,new)
+src = src[:candidate_start] + new + src[candidate_end:]
 
 insert_at=src.index('    private void consumeOtaNotification(byte[] chunk) {')
 candidate_parser='''    private void consumeCandidateNotification(byte[] chunk) {
