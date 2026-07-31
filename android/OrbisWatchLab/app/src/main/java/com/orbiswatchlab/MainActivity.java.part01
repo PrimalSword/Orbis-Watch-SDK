@@ -15,7 +15,7 @@
                 gatt = currentGatt;
                 negotiatedMtu = 23;
                 otaNotificationsReady = false;
-                setStatus("G28 conectado. Descobrindo serviços em modo passivo...");
+                setStatus("Link BLE aberto. Descobrindo serviços do G28...");
                 if (hasConnectPermission()) {
                     boolean queued = false;
                     try {
@@ -63,12 +63,19 @@
                 return;
             }
             discoverCharacteristics(currentGatt);
-            setStatus(otaWrite != null && otaNotify != null
-                    ? "G28 passivo — canal OTA encontrado, notificações desligadas"
-                    : "G28 passivo — OTA não exposto no modo normal");
             renderOtaStatus();
-            append("MODO PASSIVO: nenhuma CCCD, notificação, MTU extra ou quadro foi enviado automaticamente.");
-            append("Use os botões manuais para ativar NUS ou OTA somente depois de confirmar estabilidade.");
+
+            if (nusWrite == null || nusNotify == null) {
+                setStatus("G28 respondeu, mas o canal NUS não foi encontrado");
+                append("Sessão não validada: NUS write/notify ausente.");
+                return;
+            }
+
+            notifyQueue.clear();
+            notifyQueue.add(nusNotify);
+            setStatus("G28 encontrado. Ativando sessão NUS...");
+            append("Inicialização compatível com o app anterior: ativando somente NUS notify antes de qualquer OTA.");
+            configureNextNotification();
         }
 
         @Override
@@ -110,8 +117,20 @@
 
         @Override
         public void onDescriptorWrite(BluetoothGatt currentGatt, BluetoothGattDescriptor descriptor, int status) {
-            append("NOTIFY configurado " + descriptor.getCharacteristic().getUuid() + " status=" + status);
-            if (otaNotify != null && otaNotify.getUuid().equals(descriptor.getCharacteristic().getUuid())
+            UUID characteristicUuid = descriptor.getCharacteristic().getUuid();
+            append("NOTIFY configurado " + characteristicUuid + " status=" + status);
+
+            if (nusNotify != null && nusNotify.getUuid().equals(characteristicUuid)) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    setStatus("Sessão NUS ativa. Validando o relógio...");
+                    append("NUS notify confirmado; enviando DEVICE_INFO 0xF3 como handshake seguro.");
+                    schedule(180, () -> sendNusFrame(buildNusFrame(0xF3, 0x01, 0, 0, 0)));
+                } else {
+                    setStatus("Falha ao ativar a sessão NUS: " + status);
+                }
+            }
+
+            if (otaNotify != null && otaNotify.getUuid().equals(characteristicUuid)
                     && status == BluetoothGatt.GATT_SUCCESS) {
                 otaNotificationsReady = true;
                 renderOtaStatus();
