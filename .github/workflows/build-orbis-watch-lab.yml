@@ -25,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble v3.24 source
+      - name: Assemble v3.25 source
         run: |
           cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
             | tr -d '\n\r' \
@@ -55,15 +55,16 @@ jobs:
           python android/OrbisWatchLab/tools/patch_v322_ack_binlist_audit.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           python android/OrbisWatchLab/tools/patch_v323_historical_binlist_probe.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           python android/OrbisWatchLab/tools/patch_v324_diagnostics_par_archaeology.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/patch_v325_server_side_channel_probe.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Orbis Watch OTA 5610 v3.24" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Orbis Watch OTA 5610 v3.25" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "23. Consultar versões anteriores V1.4→V1.0" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "24. Mostrar arqueologia 0x07/0x0B/0xF0" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "25. Mostrar análise Bluetrum .par" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "CONSULTA HISTÓRICA BIN_LIST G28" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "ARQUEOLOGIA HRYFINE" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "BLUETRUM ABPARTOOL" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "buildHistoricalUniqueCode" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "26. Consultar canais alternativos do servidor" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "FORCE_UPDATE_ENDPOINT" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "FIRMWARE_CONFIG_ENDPOINT" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Nenhum login anônimo foi criado" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "nenhum 0x03, nenhum bloco de firmware e nenhum TX BLE" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "HRYFINE ACK" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "AUDITORIA BIN_LIST" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
@@ -85,7 +86,7 @@ jobs:
       - name: Package outputs
         run: |
           mkdir -p dist/source
-          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.24.apk
+          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.25.apk
           cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
           cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
           cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
@@ -95,20 +96,21 @@ jobs:
           cp android/OrbisWatchLab/docs/hryfine-3.8.9-historical-binlist-probe.md dist/source/
           cp android/OrbisWatchLab/docs/hryfine-3.8.9-diagnostic-command-audit.md dist/source/
           cp android/OrbisWatchLab/docs/bluetrum-abpartool-static-analysis.md dist/source/
-          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.24-source.zip .
+          cp android/OrbisWatchLab/docs/hryfine-3.8.9-server-side-channel-probe.md dist/source/
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.25-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.24
-          path: dist/Orbis-Watch-OTA-5610-v3.24.apk
+          name: Orbis-Watch-OTA-5610-v3.25
+          path: dist/Orbis-Watch-OTA-5610-v3.25.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.24-source
-          path: dist/Orbis-Watch-OTA-5610-v3.24-source.zip
+          name: Orbis-Watch-OTA-5610-v3.25-source
+          path: dist/Orbis-Watch-OTA-5610-v3.25-source.zip
           if-no-files-found: error
           retention-days: 30
