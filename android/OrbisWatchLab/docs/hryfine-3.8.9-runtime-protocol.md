@@ -29,11 +29,11 @@ UUIDs:
 - app → relógio: `6E400002-B5A3-F393-E0A9-E50E24DCCA9F`
 - relógio → app: `6E400003-B5A3-F393-E0A9-E50E24DCCA9F`
 
-Quadro normal:
+Quadro `DF` de dados/comando:
 
 | Offset | Campo |
 |---:|---|
-| 0 | prefixo `DF` (dados/comando) ou `FD` (ACK) |
+| 0 | prefixo `DF` |
 | 1–2 | comprimento do corpo, big-endian |
 | 3 | soma aditiva de 8 bits, excluindo o próprio byte 3 |
 | 4 | command ID |
@@ -43,6 +43,26 @@ Quadro normal:
 | 9… | payload |
 
 Comprimento total: `4 + bodyLength`.
+
+ACK compacto `FD`:
+
+| Offset | Campo |
+|---:|---|
+| 0 | prefixo `FD` |
+| 1–2 | comprimento do corpo (`00 05`) |
+| 3 | checksum aditivo |
+| 4 | command ID confirmado |
+| 5 | key original |
+| 6–7 | metadado de 16 bits ignorado pelo `handleAck()` do HryFine |
+| 8 | status (`01` = sucesso) |
+
+O ACK `FD` não usa os offsets 7–8 como tamanho de payload. Exemplo real:
+
+```text
+FD 00 05 25 19 00 00 09 01
+```
+
+Interpretação: `command=19`, `key=00`, `meta=0009`, `status=01`.
 
 Exemplo de consulta de configurações:
 
@@ -131,7 +151,7 @@ b2 = ((hour & 0x0F) << 4) | (minute >> 2)
 b3 = ((minute & 3) << 6) | second
 ```
 
-A versão v3.21 apenas gera uma prévia local desse quadro; não o transmite.
+A versão v3.22 apenas gera uma prévia local desse quadro; não o transmite.
 
 ### Beber água — escrita
 
@@ -260,6 +280,21 @@ O payload precisa começar em `AA`. Flags selecionadas recuperadas do parser Hry
 - byte 28: código de pareamento BLE e identificação do produto.
 
 Esse comando é central para decidir se o “OK Google” depende de HID/Classic e para confirmar capacidades de recuperação.
+
+## `bin_list` e firmware
+
+O HryFine contém a classe `OtaUpdateInfo.bin_list`, o parser, o endpoint e o fluxo de download, mas não contém uma lista concreta nem os arquivos de firmware do G28 dentro do APK.
+
+Cada item vindo do servidor possui:
+
+```text
+id, hry_id, part_id, part_addr, part_len, bin_file, bin_size,
+status, is_force, is_test, is_white
+```
+
+Quando a lista é não vazia, o aplicativo ordena por `part_id`, baixa cada `bin_file` para `files/ota/` e monta a tabela `0x03` com registros de nove bytes. Quando a lista está vazia ou ausente, o fluxo oficial não inicia.
+
+A v3.22 apenas audita esses metadados, caso apareçam; não baixa BIN e não envia `0x03`.
 
 ## OTA 5610 confirmado
 
