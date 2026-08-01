@@ -1,0 +1,134 @@
+name: Build Orbis G28 Watchface Replay Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["android-watchface-replay-v0-1"]
+    paths:
+      - "android/OrbisWatchfaceReplayAndroid/**"
+      - ".github/workflows/build-orbis-watchface-replay-android.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisWatchfaceReplayAndroid/**"
+      - ".github/workflows/build-orbis-watchface-replay-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisWatchfaceReplayAndroid"
+          cat "$ROOT"/source.part*.b64 \
+            | tr -d '\n\r' \
+            | base64 -d \
+            > /tmp/orbis-watchface-replay-source.tar.xz
+          echo "dea2cdf15a69256b53800cf025d45087e893fa5cb616eb034c8b59079b2837e4  /tmp/orbis-watchface-replay-source.tar.xz" \
+            | sha256sum -c -
+          tar -xJf /tmp/orbis-watchface-replay-source.tar.xz -C "$ROOT"
+          test -s "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
+          test -s "$ROOT/app/src/main/assets/watchface_frames.json"
+
+      - name: Validate captured package and safety scope
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+
+          root = pathlib.Path("android/OrbisWatchfaceReplayAndroid")
+          package = json.loads(
+              (root / "app/src/main/assets/watchface_frames.json").read_text()
+          )
+          frames = package["frames"]
+
+          assert len(frames) == 177
+          assert sum(item["kind"] == "data" for item in frames) == 159
+          assert sum(item["kind"] == "checkpoint" for item in frames) == 16
+          assert frames[0]["kind"] == "start"
+          assert frames[-1]["kind"] == "finish"
+
+          all_bytes = b"".join(bytes.fromhex(item["hex"]) for item in frames)
+          data_bytes = b"".join(
+              bytes.fromhex(item["hex"])[1:]
+              for item in frames
+              if item["kind"] == "data"
+          )
+          assert hashlib.sha256(all_bytes).hexdigest() == (
+              "4f298b9b17b05c96f59afbb4af4f118758f81ce8581b596282aa76d15179f702"
+          )
+          assert hashlib.sha256(data_bytes).hexdigest() == (
+              "4586d5d58db3b1b006e19ce0cb1299d28bc8f1c8daf2cd3de6a44a019ff3740f"
+          )
+
+          source = (
+              root / "app/src/main/java/com/orbiswatchreplay/MainActivity.java"
+          ).read_text()
+          for required in ("0000ff00-", "0000ff02-", "0000ff01-"):
+              assert required in source
+          for forbidden in (
+              "000018a8-",
+              "00002aa9-",
+              "6e40ff02-",
+              "DF0006FD130102000101",
+          ):
+              assert forbidden not in source
+
+          print("Captured watchface and restricted BLE scope validated")
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisWatchfaceReplayAndroid clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisWatchfaceReplayAndroid"
+          mkdir -p dist/source
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" \
+            dist/Orbis-Watchface-Replay-Android-v0.1.apk
+          cp -R "$ROOT"/. dist/source/
+          rm -f dist/source/source.part*.b64
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -r ../Orbis-Watchface-Replay-Android-v0.1-source.zip .)
+          sha256sum dist/Orbis-Watchface-Replay-Android-v0.1.apk
+          sha256sum dist/Orbis-Watchface-Replay-Android-v0.1-source.zip
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-Watchface-Replay-Android-v0.1
+          path: dist/Orbis-Watchface-Replay-Android-v0.1.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-Watchface-Replay-Android-v0.1-source
+          path: dist/Orbis-Watchface-Replay-Android-v0.1-source.zip
+          if-no-files-found: error
+          retention-days: 30
