@@ -39,9 +39,12 @@ jobs:
           echo "500965b01ec6261a56777e7e8eeb618651e4e63d6a9ea4d7df8c8a466988355a  /tmp/orbis-g28-inferno-probe-source.tar.xz" \
             | sha256sum -c -
           tar -xJf /tmp/orbis-g28-inferno-probe-source.tar.xz -C "$PROJECT"
-          test -s "$PROJECT/app/src/main/java/com/orbisg28inferno/MainActivity.java"
+          MAIN="$PROJECT/app/src/main/java/com/orbisg28inferno/MainActivity.java"
+          sed -i 's/ImageView.ScaleType.NEAREST_NEIGHBOR/ImageView.ScaleType.CENTER_INSIDE/' "$MAIN"
+          test -s "$MAIN"
           test -s "$PROJECT/app/src/main/java/com/bluetrum/abpartool/ParTool.java"
           test -s "$PROJECT/app/src/main/jniLibs/arm64-v8a/libabpartool.so"
+          ! grep -q "NEAREST_NEIGHBOR" "$MAIN"
 
       - name: Validate read-only scope
         shell: bash
