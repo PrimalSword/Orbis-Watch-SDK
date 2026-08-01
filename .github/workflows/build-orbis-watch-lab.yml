@@ -25,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble v3.19 source
+      - name: Assemble v3.20 source
         run: |
           cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
             | tr -d '\n\r' \
@@ -45,16 +45,19 @@ jobs:
           python android/OrbisWatchLab/tools/patch_v317_info_after_handshake.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           python android/OrbisWatchLab/tools/patch_v318_preservation_baseline.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           python android/OrbisWatchLab/tools/patch_v319_runtime_capability_survey.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/patch_v320_multichannel_runtime_diff.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Orbis Watch OTA 5610 v3.19" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "8. Consultar configurações atuais — NUS 0x09/0x00" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "9. Consultar identificação do produto — NUS 0x20/0x00" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "10. Escutar notificações passivas por 30 s — sem TX" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "11. Gerar relatório runtime — local" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "RUNTIME SETTINGS RX" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "RUNTIME PRODUCT RX" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "CAPTURA PASSIVA concluída" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "RELATÓRIO RUNTIME G28 v3.19" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Orbis Watch OTA 5610 v3.20" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "12. Ativar canais runtime NUS/FF14/FF01/bateria — somente CCCD" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "13. Capturar configurações A — leitura NUS 0x09" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "14. Capturar configurações B e comparar — leitura NUS 0x09" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "15. Captura multicanal por 60 s — sem comando de aplicação" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "16. Gerar relatório multicanal/diferencial — local" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "ATIVAÇÃO MULTICANAL RUNTIME v3.20" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "DIFERENÇA CONFIGURAÇÕES A/B v3.20" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "CAPTURA MULTICANAL RUNTIME v3.20" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "RELATÓRIO MULTICANAL/DIFERENCIAL G28 v3.20" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "settingSysTime()" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -73,25 +76,25 @@ jobs:
       - name: Package outputs
         run: |
           mkdir -p dist/source
-          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.19.apk
+          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.20.apk
           cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
           cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
           cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
           cp android/OrbisWatchLab/DOOM_FIRMWARE_REQUIREMENTS.md dist/source/
-          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.19-source.zip .
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.20-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.19
-          path: dist/Orbis-Watch-OTA-5610-v3.19.apk
+          name: Orbis-Watch-OTA-5610-v3.20
+          path: dist/Orbis-Watch-OTA-5610-v3.20.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.19-source
-          path: dist/Orbis-Watch-OTA-5610-v3.19-source.zip
+          name: Orbis-Watch-OTA-5610-v3.20-source
+          path: dist/Orbis-Watch-OTA-5610-v3.20-source.zip
           if-no-files-found: error
           retention-days: 30
