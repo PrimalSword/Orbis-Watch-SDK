@@ -11,8 +11,17 @@ src = src.replace('Orbis Watch OTA 5610 v3.16', 'Orbis Watch OTA 5610 v3.17')
 src = src.replace('Transporte 18A8 confirmado; requisição oficial D5/0x0F usando WRITE_NR',
                   'Transporte 18A8 confirmado; handshake D5/0x0F e identidade D5/0x01')
 
-src = src.replace('    private boolean otaProbeAwaitingResponse;\n',
-                  '    private boolean otaProbeAwaitingResponse;\n    private boolean otaProtocolNegotiated;\n    private String otaBootProtocolVersion = "";\n', 1)
+old_fields = '''    private boolean otaProbeAwaitingResponse;
+    private boolean gattConnectInProgress;
+'''
+new_fields = '''    private boolean otaProbeAwaitingResponse;
+    private boolean otaProtocolNegotiated;
+    private String otaBootProtocolVersion = "";
+    private boolean gattConnectInProgress;
+'''
+if old_fields not in src:
+    raise SystemExit('v3.17 field anchor missing')
+src = src.replace(old_fields, new_fields, 1)
 
 anchor = '''        Button inspectBootloader = button("4. Negociar protocolo — D5/0x0F via WRITE_NR");
         inspectBootloader.setOnClickListener(v -> confirmOtaInspection());
@@ -83,69 +92,44 @@ if method_anchor not in src:
     raise SystemExit('v3.17 method anchor missing')
 src = src.replace(method_anchor, methods + method_anchor, 1)
 
-old_protocol = '''                    if (command == 0x0F && payloadLength > 0) {
-                        String version = new String(payload, StandardCharsets.UTF_8).trim();
-                        append("OTA protocolo/versão: " + version + " | parityStyle=" + otaParityStyle);
-                    }
+old_parser = '''        if (command == 0x0F && status == 1) {
+            parityStyle = true;
+            otaVersion = new String(payload, StandardCharsets.UTF_8).trim();
+            append("OTA protocolo/versão: " + otaVersion + " | parityStyle=true");
+        } else if (command == 0x01 && status == 1) {
+            parseOtaInfoPayload(payload);
+        }
 '''
-new_protocol = '''                    if (command == 0x0F && payloadLength > 0) {
-                        String version = new String(payload, StandardCharsets.UTF_8).trim();
-                        otaBootProtocolVersion = version;
-                        otaProtocolNegotiated = status == 1 && "V1.1".equals(version);
-                        append("OTA protocolo/versão: " + version + " | parityStyle=" + otaParityStyle
-                                + " | negociado=" + otaProtocolNegotiated);
-                    }
-                    if (command == 0x01 && status == 1) {
-                        parseOtaIdentityPayload(payload);
-                    }
+new_parser = '''        if (command == 0x0F && status == 1) {
+            parityStyle = true;
+            otaBootProtocolVersion = new String(payload, StandardCharsets.UTF_8).trim();
+            otaProtocolNegotiated = "V1.1".equals(otaBootProtocolVersion);
+            append("OTA protocolo/versão: " + otaBootProtocolVersion
+                    + " | parityStyle=true | negociado=" + otaProtocolNegotiated);
+        } else if (command == 0x01 && status == 1) {
+            parseOtaInfoPayload(payload);
+            append("OTA IDENTIDADE RX → versão=" + otaVersion
+                    + " projeto=" + otaProject + " unique_code=" + otaUniqueCode);
+            if ("V1.5".equals(otaVersion) && "G28".equals(otaProject)) {
+                append("IDENTIDADE OTA CONFIRMADA: G28 V1.5. Próxima etapa continuará somente leitura.");
+            }
+        }
 '''
-if old_protocol not in src:
+if old_parser not in src:
     raise SystemExit('v3.17 D6 parser anchor missing')
-src = src.replace(old_protocol, new_protocol, 1)
+src = src.replace(old_parser, new_parser, 1)
 
-parser_anchor = '''    private byte[] buildOfficial5610Request(int command, int version, int blockIndex, int fragmentIndex, byte[] payload) {
+old_disconnect = '''        otaBootInspectionScheduled = false;
+        cancelPendingTasks();
 '''
-parser = '''    private void parseOtaIdentityPayload(byte[] payload) {
-        if (payload == null || payload.length < 6) {
-            append("OTA IDENTIDADE RX: payload curto=" + hex(payload == null ? new byte[0] : payload));
-            return;
-        }
-        int p = 0;
-        String uniquePrefix = "";
-        if (payload.length >= 4) {
-            uniquePrefix = hex(java.util.Arrays.copyOfRange(payload, 0, 4)).replace(" ", "");
-            p = 4;
-        }
-        String version = "";
-        String project = "";
-        if (p < payload.length) {
-            int versionLength = payload[p++] & 0xFF;
-            if (versionLength <= payload.length - p) {
-                version = new String(payload, p, versionLength, StandardCharsets.UTF_8);
-                p += versionLength;
-            }
-        }
-        if (p < payload.length) {
-            int projectLength = payload[p++] & 0xFF;
-            if (projectLength <= payload.length - p) {
-                project = new String(payload, p, projectLength, StandardCharsets.UTF_8);
-            }
-        }
-        append("OTA IDENTIDADE RX → prefixo=" + uniquePrefix
-                + " versão=" + version + " projeto=" + project
-                + " payload=" + hex(payload));
-        if ("V1.5".equals(version) && "G28".equals(project)) {
-            append("IDENTIDADE OTA CONFIRMADA: G28 V1.5. Próxima etapa continuará somente leitura.");
-        }
-    }
-
+new_disconnect = '''        otaBootInspectionScheduled = false;
+        otaProtocolNegotiated = false;
+        otaBootProtocolVersion = "";
+        cancelPendingTasks();
 '''
-if parser_anchor not in src:
-    raise SystemExit('v3.17 parser insertion anchor missing')
-src = src.replace(parser_anchor, parser + parser_anchor, 1)
-
-src = src.replace('        otaBootInspectionScheduled = false;\n        cancelPendingTasks();\n',
-                  '        otaBootInspectionScheduled = false;\n        otaProtocolNegotiated = false;\n        otaBootProtocolVersion = "";\n        cancelPendingTasks();\n', 1)
+if old_disconnect not in src:
+    raise SystemExit('v3.17 disconnect reset anchor missing')
+src = src.replace(old_disconnect, new_disconnect, 1)
 
 src = src.replace('A v3.16 envia somente a requisição oficial D5/0x0F após nova confirmação.',
                   'A v3.17 permite o handshake D5/0x0F e, somente após V1.1, a consulta D5/0x01.')
