@@ -10,8 +10,8 @@ android {
         applicationId "com.orbiswatchlab"
         minSdk 21
         targetSdk 35
-        versionCode 26
-        versionName "3.22-ack-binlist-audit"
+        versionCode 27
+        versionName "3.23-historical-binlist-probe"
     }
 
     buildTypes {
