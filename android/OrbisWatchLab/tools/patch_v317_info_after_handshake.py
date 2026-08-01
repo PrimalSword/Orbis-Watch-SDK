@@ -113,7 +113,7 @@ parser = '''    private void parseOtaIdentityPayload(byte[] payload) {
         int p = 0;
         String uniquePrefix = "";
         if (payload.length >= 4) {
-            uniquePrefix = hex(Arrays.copyOfRange(payload, 0, 4)).replace(" ", "");
+            uniquePrefix = hex(java.util.Arrays.copyOfRange(payload, 0, 4)).replace(" ", "");
             p = 4;
         }
         String version = "";
