@@ -1,0 +1,103 @@
+name: Build Orbis G28 Inferno PAR Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["g28-inferno-par-probe-v0-1"]
+    paths:
+      - "android/OrbisG28InfernoProbe/**"
+      - ".github/workflows/build-orbis-g28-inferno-probe.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisG28InfernoProbe/**"
+      - ".github/workflows/build-orbis-g28-inferno-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-inferno-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28InfernoProbe"
+          PROJECT="$ROOT/project"
+          mkdir -p "$PROJECT"
+          cat "$ROOT"/source.part*.b64 \
+            | tr -d '\n\r' \
+            | base64 -d \
+            > /tmp/orbis-g28-inferno-probe-source.tar.xz
+          echo "500965b01ec6261a56777e7e8eeb618651e4e63d6a9ea4d7df8c8a466988355a  /tmp/orbis-g28-inferno-probe-source.tar.xz" \
+            | sha256sum -c -
+          tar -xJf /tmp/orbis-g28-inferno-probe-source.tar.xz -C "$PROJECT"
+          MAIN="$PROJECT/app/src/main/java/com/orbisg28inferno/MainActivity.java"
+          sed -i 's/ImageView.ScaleType.NEAREST_NEIGHBOR/ImageView.ScaleType.CENTER_INSIDE/' "$MAIN"
+          test -s "$MAIN"
+          test -s "$PROJECT/app/src/main/java/com/bluetrum/abpartool/ParTool.java"
+          test -s "$PROJECT/app/src/main/jniLibs/arm64-v8a/libabpartool.so"
+          ! grep -q "NEAREST_NEIGHBOR" "$MAIN"
+
+      - name: Validate read-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="android/OrbisG28InfernoProbe/project"
+          grep -R -q "INFERNO PAR PROBE" "$PROJECT/app/src/main/java"
+          grep -R -q "rawToPar" "$PROJECT/app/src/main/java"
+          ! grep -R -q "android.bluetooth" "$PROJECT/app/src/main" || exit 1
+          ! grep -R -q "BLUETOOTH_CONNECT\|BLUETOOTH_SCAN" "$PROJECT/app/src/main" || exit 1
+          ! grep -R -q "0000ff00\|0000ff01\|0000ff02\|000018a8\|00002aa9" "$PROJECT/app/src/main" || exit 1
+          echo "Validated: no BLE, OTA, firmware, RTC, NUS or partition path"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28InfernoProbe/project clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="android/OrbisG28InfernoProbe/project"
+          mkdir -p dist/source
+          cp "$PROJECT/app/build/outputs/apk/debug/app-debug.apk" \
+            dist/Orbis-G28-Inferno-PAR-Probe-v0.1.apk
+          cp -R "$PROJECT"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -r ../Orbis-G28-Inferno-PAR-Probe-v0.1-source.zip .)
+          sha256sum dist/Orbis-G28-Inferno-PAR-Probe-v0.1.apk
+          sha256sum dist/Orbis-G28-Inferno-PAR-Probe-v0.1-source.zip
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Inferno-PAR-Probe-v0.1
+          path: dist/Orbis-G28-Inferno-PAR-Probe-v0.1.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Inferno-PAR-Probe-v0.1-source
+          path: dist/Orbis-G28-Inferno-PAR-Probe-v0.1-source.zip
+          if-no-files-found: error
+          retention-days: 30
