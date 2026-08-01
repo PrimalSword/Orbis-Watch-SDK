@@ -62,3 +62,42 @@ The survey must not:
 - send firmware blocks, checksums, finalization, or reboot commands.
 
 The exact frame produced by `SettingIssuedUtils.settingSysTime()` remains required before any clock synchronization implementation is allowed.
+
+## HryFine 3.8.9 full-protocol extraction
+
+The complete installed HryFine 3.8.9 project was exported and inspected. This replaces the earlier assumption that the 71-byte settings block was opaque.
+
+Confirmed runtime frame layout:
+
+- `DF` data/command and `FD` acknowledgement;
+- 16-bit big-endian body length at bytes 1–2;
+- additive 8-bit checksum at byte 3, excluding byte 3 itself;
+- command at byte 4, protocol version at byte 5, key/action at byte 6;
+- 16-bit big-endian payload length at bytes 7–8;
+- payload from byte 9.
+
+Confirmed read-only commands now allowed in the laboratory:
+
+- `0x09/0x00`: device settings;
+- `0x11/0x00`: drink-water reminder;
+- `0x14/0x00`: sedentary reminder;
+- `0x19/0x00`: device feature bitmap;
+- `0x20/0x00`: product identification, although the G28 has so far returned only an ACK.
+
+Confirmed but still non-transmitting previews:
+
+- `0x02/0x01`: packed system time/RTC;
+- `0x02/0x0B`: phone finds bracelet;
+- `0x02/0x0C`: camera mode;
+- `0x02/0x21`: drink-water write schema;
+- `0x02/0x03`: sedentary write schema.
+
+Incoming `0x0C` device-control actions are now decoded, including find phone, take photo, media controls, Bluetooth status, and Android bond requests.
+
+No explicit NUS command or Android Assistant intent was found for “OK Google”. Feature query `0x19/0x00` must be used to check `supportHID`; Bluetooth Classic/HID remains the leading hypothesis, not a confirmed fact.
+
+## v3.21 safe policy
+
+v3.21 may decode all normal NUS frames and issue the read-only commands above. It may build exact RTC/camera/find-bracelet frames locally for inspection.
+
+v3.21 must not transmit the recovered runtime writes, must not use command `0x0A FLASH_READ`, and must not unlock any OTA partition or firmware operation.
