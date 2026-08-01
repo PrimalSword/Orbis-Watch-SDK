@@ -10,8 +10,8 @@ android {
         applicationId "com.orbiswatchlab"
         minSdk 21
         targetSdk 35
-        versionCode 23
-        versionName "3.19-runtime-capability-survey"
+        versionCode 24
+        versionName "3.20-multichannel-runtime-diff"
     }
 
     buildTypes {
