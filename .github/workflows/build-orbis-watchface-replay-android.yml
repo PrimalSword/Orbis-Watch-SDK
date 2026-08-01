@@ -3,7 +3,7 @@ name: Build Orbis G28 Watchface Replay Android
 on:
   workflow_dispatch:
   push:
-    branches: ["android-watchface-replay-v0-1"]
+    branches: ["android-watchface-replay-v0-2"]
     paths:
       - "android/OrbisWatchfaceReplayAndroid/**"
       - ".github/workflows/build-orbis-watchface-replay-android.yml"
@@ -25,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct source snapshot
+      - name: Reconstruct and patch v0.2 source snapshot
         shell: bash
         run: |
           set -euo pipefail
@@ -37,8 +37,15 @@ jobs:
           echo "dea2cdf15a69256b53800cf025d45087e893fa5cb616eb034c8b59079b2837e4  /tmp/orbis-watchface-replay-source.tar.xz" \
             | sha256sum -c -
           tar -xJf /tmp/orbis-watchface-replay-source.tar.xz -C "$ROOT"
+          python "$ROOT/tools/patch_v02_discovery_first.py" \
+            "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
           test -s "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
           test -s "$ROOT/app/src/main/assets/watchface_frames.json"
+          grep -q "REPLAY ANDROID v0.2" "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
+          grep -q "Descoberta GATT será iniciada antes de MTU/prioridade" \
+            "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
+          grep -q "FF01 notify ativo. Solicitando MTU somente agora" \
+            "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
 
       - name: Validate captured package and safety scope
         run: |
@@ -85,7 +92,10 @@ jobs:
           ):
               assert forbidden not in source
 
-          print("Captured watchface and restricted BLE scope validated")
+          first_discovery = source.index("discoverOnce(callbackGatt)")
+          first_mtu = source.index("requestMtu(247)")
+          assert first_discovery < first_mtu
+          print("v0.2 discovery-first flow and restricted BLE scope validated")
           PY
 
       - name: Set up Java 17
@@ -109,26 +119,26 @@ jobs:
           ROOT="android/OrbisWatchfaceReplayAndroid"
           mkdir -p dist/source
           cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" \
-            dist/Orbis-Watchface-Replay-Android-v0.1.apk
+            dist/Orbis-Watchface-Replay-Android-v0.2.apk
           cp -R "$ROOT"/. dist/source/
           rm -f dist/source/source.part*.b64
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-Watchface-Replay-Android-v0.1-source.zip .)
-          sha256sum dist/Orbis-Watchface-Replay-Android-v0.1.apk
-          sha256sum dist/Orbis-Watchface-Replay-Android-v0.1-source.zip
+          (cd dist/source && zip -r ../Orbis-Watchface-Replay-Android-v0.2-source.zip .)
+          sha256sum dist/Orbis-Watchface-Replay-Android-v0.2.apk
+          sha256sum dist/Orbis-Watchface-Replay-Android-v0.2-source.zip
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watchface-Replay-Android-v0.1
-          path: dist/Orbis-Watchface-Replay-Android-v0.1.apk
+          name: Orbis-Watchface-Replay-Android-v0.2
+          path: dist/Orbis-Watchface-Replay-Android-v0.2.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watchface-Replay-Android-v0.1-source
-          path: dist/Orbis-Watchface-Replay-Android-v0.1-source.zip
+          name: Orbis-Watchface-Replay-Android-v0.2-source
+          path: dist/Orbis-Watchface-Replay-Android-v0.2-source.zip
           if-no-files-found: error
           retention-days: 30
