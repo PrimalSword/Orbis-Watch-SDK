@@ -10,8 +10,8 @@ android {
         applicationId "com.orbiswatchlab"
         minSdk 21
         targetSdk 35
-        versionCode 21
-        versionName "3.17-info-after-handshake"
+        versionCode 22
+        versionName "3.18-preservation-baseline"
     }
 
     buildTypes {
