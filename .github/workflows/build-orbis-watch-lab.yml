@@ -25,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble v3.22 source
+      - name: Assemble v3.23 source
         run: |
           cat android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
             | tr -d '\n\r' \
@@ -53,14 +53,15 @@ jobs:
             > /tmp/patch_v321_hryfine_protocol_map.py
           python /tmp/patch_v321_hryfine_protocol_map.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           python android/OrbisWatchLab/tools/patch_v322_ack_binlist_audit.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          python android/OrbisWatchLab/tools/patch_v323_historical_binlist_probe.py android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           test -s android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Orbis Watch OTA 5610 v3.22" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "22. Explicar bin_list do HryFine — local" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "Orbis Watch OTA 5610 v3.23" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "23. Consultar versões anteriores V1.4→V1.0" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "CONSULTA HISTÓRICA BIN_LIST G28" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "buildHistoricalUniqueCode" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
+          grep -q "nenhum 0x03, nenhum bloco de firmware e nenhum TX BLE" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "HRYFINE ACK" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
           grep -q "AUDITORIA BIN_LIST" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "meta_opaque" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "Nenhum BIN de firmware do G28 está embutido" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
-          grep -q "nenhum bin_file foi baixado e nenhum comando 0x03 foi enviado" android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -79,27 +80,28 @@ jobs:
       - name: Package outputs
         run: |
           mkdir -p dist/source
-          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.22.apk
+          cp android/OrbisWatchLab/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-Watch-OTA-5610-v3.23.apk
           cp android/OrbisWatchLab/app/src/main/java/com/orbiswatchlab/MainActivity.java dist/source/
           cp android/OrbisWatchLab/app/src/main/AndroidManifest.xml dist/source/
           cp android/OrbisWatchLab/app/build.gradle dist/source/app-build.gradle
           cp android/OrbisWatchLab/DOOM_FIRMWARE_REQUIREMENTS.md dist/source/
           cp android/OrbisWatchLab/docs/hryfine-3.8.9-runtime-protocol.md dist/source/
           cp android/OrbisWatchLab/docs/hryfine-3.8.9-ota-binlist-flow.md dist/source/
-          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.22-source.zip .
+          cp android/OrbisWatchLab/docs/hryfine-3.8.9-historical-binlist-probe.md dist/source/
+          cd dist/source && zip -r ../Orbis-Watch-OTA-5610-v3.23-source.zip .
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.22
-          path: dist/Orbis-Watch-OTA-5610-v3.22.apk
+          name: Orbis-Watch-OTA-5610-v3.23
+          path: dist/Orbis-Watch-OTA-5610-v3.23.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-Watch-OTA-5610-v3.22-source
-          path: dist/Orbis-Watch-OTA-5610-v3.22-source.zip
+          name: Orbis-Watch-OTA-5610-v3.23-source
+          path: dist/Orbis-Watch-OTA-5610-v3.23-source.zip
           if-no-files-found: error
           retention-days: 30
