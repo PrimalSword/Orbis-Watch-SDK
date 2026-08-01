@@ -37,11 +37,28 @@ The DOOM experiment must remain a smartwatch firmware, not a one-way demo image.
 - All eight readable characteristics completed successfully.
 - Empty direct reads from notify channels are expected until a command or event produces a notification.
 
-## Runtime survey policy
+## Runtime survey findings
 
-The next safe survey may send only official read requests used by HryFine:
+The official NUS settings request `0x09/0x00` returned a stable 71-byte payload. The bytes are preserved verbatim and are not assigned meanings without an A/B test.
 
-- `0x09/0x00` — current settings;
-- `0x20/0x00` — product identification.
+The product-identification request `0x20/0x00` returned only the normal `FD` acknowledgement on this G28; no `DF/0x20` payload was observed. Product identification is therefore not a mandatory compatibility feature for the custom firmware unless later evidence changes this conclusion.
 
-These requests must not be confused with firmware reads. They are used only to document the clock/UI/BLE behavior that a future DOOM firmware must preserve.
+A passive 30-second capture on NUS alone produced no spontaneous notification. This does not prove that the watch has no events; the alternate notify channels `FF14`, `FF01`, and battery `2A19` had not been enabled in that session.
+
+## v3.20 safe survey policy
+
+The next survey may:
+
+- enable CCCDs for NUS, `FF14`, `FF01`, and battery `2A19`;
+- listen passively on all enabled channels;
+- issue the official read-only settings request `0x09/0x00`;
+- store two settings snapshots and compare byte offsets locally.
+
+The survey must not:
+
+- set time or RTC;
+- change any watch setting from the Android application;
+- send partition command `0x03`;
+- send firmware blocks, checksums, finalization, or reboot commands.
+
+The exact frame produced by `SettingIssuedUtils.settingSysTime()` remains required before any clock synchronization implementation is allowed.
