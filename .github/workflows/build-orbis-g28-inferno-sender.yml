@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28InfernoSender"
           mkdir -p "$ROOT"
-          cat "$ROOT"/source.part*.b64 | tr -d '\\n\\r' | base64 -d > /tmp/orbis-g28-inferno-sender.tar.xz
+          cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/orbis-g28-inferno-sender.tar.xz
           echo "0a57dffdbb68ce4f913d9bc18cc71585751ee00c4cdbfbd44e1e36fc1017908e  /tmp/orbis-g28-inferno-sender.tar.xz" | sha256sum -c -
           tar -xJf /tmp/orbis-g28-inferno-sender.tar.xz -C "$ROOT"
           test -s "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
