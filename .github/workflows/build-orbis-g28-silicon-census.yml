@@ -3,7 +3,7 @@ name: Build Orbis G28 Silicon Census
 on:
   workflow_dispatch:
   push:
-    branches: ["g28-silicon-census-v0-3"]
+    branches: ["g28-silicon-census-v0-4"]
     paths:
       - "android/OrbisG28SiliconCensus/**"
       - ".github/workflows/build-orbis-g28-silicon-census.yml"
@@ -25,23 +25,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct and prepare source
+      - name: Reconstruct source
         shell: bash
         run: |
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus"
           APP="$ROOT/g28_silicon_census"
           cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/g28-silicon-census.tar.xz
-          echo "57a35a6806deed9e91b1efbf8312f47c1fffa266aff5326dd9d9de5422d89ea6  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
+          echo "1082f39f0d1e6df6ac096dad4100f11067597d30309d562e42e04bcdea36ed5f  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
           tar -xJf /tmp/g28-silicon-census.tar.xz -C "$ROOT"
-          sed -i "s/minSdk 23/minSdk 24/" "$APP/app/build.gradle"
-          printf 'android.useAndroidX=true\nandroid.enableJetifier=false\norg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n' > "$APP/gradle.properties"
-          grep -q "minSdk 24" "$APP/app/build.gradle"
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/CollectorUserService.java"
           test -s "$APP/app/src/main/aidl/com/orbisg28siliconcensus/ICollectorUserService.aidl"
 
-      - name: Validate safe scope and collector
+      - name: Validate safe scope and HCI feature fingerprint
         shell: bash
         run: |
           set -euo pipefail
@@ -55,10 +52,12 @@ jobs:
           gradle = (root / "app/build.gradle").read_text()
 
           for token in (
-              '41:42:99:10:58:57', 'buildNusFrame(0xF3',
-              'Read Remote Version Information', 'manufacturer=0x%04X',
-              'claimConnection("scan filtrado")', 'Shizuku.bindUserService',
-              'COLETAR BUGREPORT E ANALISAR HCI', 'BTSNOOP_LOG_SUMMARY',
+              '41:42:99:10:58:57', '41:42:99:10:58:02',
+              'buildNusFrame(0xF3', 'HCI BR/EDR FEATURES page=0',
+              'HCI BR/EDR EXT FEATURES', 'HCI LE FEATURES page=0',
+              'HCI REMOTE NAME', 'HCI DUAL IDENTITY CONSISTENT',
+              'saveSanitizedHciFingerprint', 'isTargetAddress',
+              'COLETAR E DECODIFICAR HCI COMPLETO', 'BTSNOOP_LOG_SUMMARY',
               'decodeBtsnooz', 'Downloads/OrbisG28SiliconCensus'):
               assert token in source, token
 
@@ -76,10 +75,10 @@ jobs:
           assert source.count('writeDescriptor(') == 2
           assert 'void destroy() = 16777114;' in aidl
           assert 'rikka.shizuku.ShizukuProvider' in manifest
-          assert "versionName '0.3-local-hci-collector'" in gradle
+          assert "versionName '0.4-hci-feature-fingerprint'" in gradle
           assert 'minSdk 24' in gradle
           assert 'dev.rikka.shizuku:api:13.1.5' in gradle
-          print('Silicon Census v0.3 scope and collector validated')
+          print('Silicon Census v0.4 safe HCI feature fingerprint validated')
           PY
 
       - name: Set up Java 17
@@ -102,27 +101,27 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus/g28_silicon_census"
           mkdir -p dist/source
-          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.3.apk
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.4.apk
           cp -R "$ROOT"/. dist/source/
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.3-source.zip .)
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.3.apk | tee dist/Orbis-G28-Silicon-Census-v0.3.apk.sha256
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.3-source.zip
+          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.4-source.zip .)
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.4.apk | tee dist/Orbis-G28-Silicon-Census-v0.4.apk.sha256
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.4-source.zip
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.3
+          name: Orbis-G28-Silicon-Census-v0.4
           path: |
-            dist/Orbis-G28-Silicon-Census-v0.3.apk
-            dist/Orbis-G28-Silicon-Census-v0.3.apk.sha256
+            dist/Orbis-G28-Silicon-Census-v0.4.apk
+            dist/Orbis-G28-Silicon-Census-v0.4.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.3-source
-          path: dist/Orbis-G28-Silicon-Census-v0.3-source.zip
+          name: Orbis-G28-Silicon-Census-v0.4-source
+          path: dist/Orbis-G28-Silicon-Census-v0.4-source.zip
           if-no-files-found: error
           retention-days: 30
