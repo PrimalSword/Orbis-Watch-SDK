@@ -3,7 +3,7 @@ name: Build Orbis G28 Silicon Census
 on:
   workflow_dispatch:
   push:
-    branches: ["g28-silicon-census-v0-6"]
+    branches: ["g28-silicon-census-v0-7"]
     paths:
       - "android/OrbisG28SiliconCensus/**"
       - ".github/workflows/build-orbis-g28-silicon-census.yml"
@@ -37,12 +37,14 @@ jobs:
           tar -xJf /tmp/g28-silicon-census.tar.xz -C "$APP"
           base64 -d "$ROOT/patch_v06.py.gz.b64" | gzip -d > /tmp/patch_v06.py
           python /tmp/patch_v06.py "$APP"
+          base64 -d "$ROOT/patch_v07.py.gz.b64" | gzip -d > /tmp/patch_v07.py
+          python /tmp/patch_v07.py "$APP"
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/CollectorUserService.java"
           test -s "$APP/app/src/main/aidl/com/orbisg28siliconcensus/ICollectorUserService.aidl"
           test -s "$APP/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp"
 
-      - name: Validate safe scope, icon, ecosystem classifier and strict OTA input
+      - name: Validate safe scope, icon and static OTA 5610 flow mapper
         shell: bash
         run: |
           set -euo pipefail
@@ -60,15 +62,14 @@ jobs:
               'buildNusFrame(0xF3', 'HCI BR/EDR FEATURES page=0',
               'HCI LE FEATURES page=0', 'HCI DUAL IDENTITY CONSISTENT',
               'ANALISAR HRYFINE INSTALADO E CLASSIFICAR SOC',
-              'analyzeInstalledHryFineEcosystem', 'scanEcosystemApk',
-              'com.lianhezhuli.hyfit', 'ABPARTTOOL', 'BT8918A',
-              'BT8918D', 'BT8918C', 'BT8918F', 'BT895',
-              'g28_soc_ecosystem_classification_',
+              'MAPEAR FLUXO OTA 5610 DO HRYFINE',
+              'startOta5610FlowMapping', 'analyzeInstalledHryFineOtaFlow',
+              'analyzeDexOtaFlow', 'scanRelevantClassData', 'scanRelevantCode',
+              'CONST_STRING', 'source_file=', 'g28_5610_flow_map_',
+              'com.lianhezhuli.hyfit', 'Cus5610', 'bin_list',
+              'part_addr', 'part_len', 'part_id',
               'validateRealFirmwareCandidate',
-              'Arquivo rejeitado: este é um relatório gerado pelo próprio Silicon Census',
-              'ANALISAR PACOTE REAL / BIN_LIST', 'analyzeOtaPackage',
-              'g28_ota_static_analysis_', 'part_id', 'part_addr', 'part_len',
-              'bin_file'):
+              'Arquivo rejeitado: este é um relatório gerado pelo próprio Silicon Census'):
               assert token in source, token
 
           for token in ('bugreportz', 'collectBugreport', 'ParcelFileDescriptor',
@@ -78,7 +79,8 @@ jobs:
           for token in ('000018a8-', '00002aa9-', '6e40ff01-', '6e40ff02-',
                         'watchface_frames', 'rawToPar', 'requestStartOTA',
                         'buildOfficial5610Request', 'FLASH_READ', 'RAM_EXEC',
-                        'JUMP_ADDRESS'):
+                        'JUMP_ADDRESS', 'HttpURLConnection', 'OkHttpClient',
+                        'openConnection(', 'startActivityForResult(new Intent(Intent.ACTION_VIEW'):
               assert token not in source, token
 
           assert source.count('writeCharacteristic(') == 2
@@ -87,10 +89,11 @@ jobs:
           assert 'rikka.shizuku.ShizukuProvider' in manifest
           assert 'android:icon="@mipmap/ic_launcher"' in manifest
           assert '<package android:name="com.lianhezhuli.hyfit" />' in manifest
-          assert "versionName '0.6-ecosystem-classifier'" in gradle
+          assert "versionName '0.7-ota-5610-flow-map'" in gradle
+          assert 'versionCode 7' in gradle
           assert 'minSdk 24' in gradle
           assert 'dev.rikka.shizuku:api:13.1.5' in gradle
-          print('Silicon Census v0.6 safe ecosystem classifier and strict OTA input validated')
+          print('Silicon Census v0.7 static OTA 5610 flow mapper validated')
           PY
 
       - name: Set up Java 17
@@ -113,27 +116,27 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus/g28_silicon_census"
           mkdir -p dist/source
-          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.6.apk
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.7.apk
           cp -R "$ROOT"/. dist/source/
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.6-source.zip .)
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.6.apk | tee dist/Orbis-G28-Silicon-Census-v0.6.apk.sha256
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.6-source.zip
+          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.7-source.zip .)
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.7.apk | tee dist/Orbis-G28-Silicon-Census-v0.7.apk.sha256
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.7-source.zip
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.6
+          name: Orbis-G28-Silicon-Census-v0.7
           path: |
-            dist/Orbis-G28-Silicon-Census-v0.6.apk
-            dist/Orbis-G28-Silicon-Census-v0.6.apk.sha256
+            dist/Orbis-G28-Silicon-Census-v0.7.apk
+            dist/Orbis-G28-Silicon-Census-v0.7.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.6-source
-          path: dist/Orbis-G28-Silicon-Census-v0.6-source.zip
+          name: Orbis-G28-Silicon-Census-v0.7-source
+          path: dist/Orbis-G28-Silicon-Census-v0.7-source.zip
           if-no-files-found: error
           retention-days: 30
