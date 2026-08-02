@@ -3,7 +3,7 @@ name: Build Orbis G28 Unified Lab
 on:
   workflow_dispatch:
   push:
-    branches: ["orbis-g28-lab-v1"]
+    branches: ["orbis-g28-lab-v1-1-all-or-nothing"]
     paths:
       - "android/OrbisG28Unified/**"
       - ".github/workflows/build-orbis-g28-unified.yml"
@@ -83,15 +83,21 @@ jobs:
           test -s "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
           grep -q "Orbis Watch OTA 5610 v3.25" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
 
-      - name: Assemble unified APK source
+      - name: Assemble unified v1.1 source
         shell: bash
         run: |
           set -euo pipefail
           CENSUS="android/OrbisG28SiliconCensus/g28_silicon_census"
           LAB="android/OrbisWatchLab"
           python android/OrbisG28Unified/integrate_unified_lab.py "$CENSUS" "$LAB"
+          cat android/OrbisG28Unified/patch_v11_all_or_nothing.py.gz.b64 \
+            | tr -d '\n\r' \
+            | base64 -d \
+            | gzip -dc \
+            > /tmp/patch_v11_all_or_nothing.py
+          python /tmp/patch_v11_all_or_nothing.py "$CENSUS"
 
-      - name: Validate unified scope
+      - name: Validate all-or-nothing scope
         shell: bash
         run: |
           set -euo pipefail
@@ -100,17 +106,21 @@ jobs:
           grep -q "ORBIS G28 LAB" "$JAVA/MainActivity.java"
           grep -q "class DiagnosticsActivity" "$JAVA/DiagnosticsActivity.java"
           grep -q "class ActiveLabActivity" "$JAVA/ActiveLabActivity.java"
-          grep -q "D5/0x0F" "$JAVA/ActiveLabActivity.java"
-          grep -q "D5/0x01" "$JAVA/ActiveLabActivity.java"
-          grep -q "EMERGÊNCIA" "$JAVA/ActiveLabActivity.java"
-          grep -q "BLOQUEADO" "$JAVA/ActiveLabActivity.java"
+          grep -q "MODO TUDO OU NADA — ESCRITA REAL" "$JAVA/ActiveLabActivity.java"
+          grep -q "EU ACEITO O BRICK" "$JAVA/ActiveLabActivity.java"
+          grep -q "0x003F0000L" "$JAVA/ActiveLabActivity.java"
+          grep -q "MARKER_NO_FINISH" "$JAVA/ActiveLabActivity.java"
+          grep -q "buildOfficial5610Request(0x03" "$JAVA/ActiveLabActivity.java"
+          grep -q "buildOfficial5610Request(part.mapping" "$JAVA/ActiveLabActivity.java"
+          grep -q "ORBIS_G28_BT8918C_FLASH_PROBE_V1" "$JAVA/ActiveLabActivity.java"
+          ! grep -q "buildOta5610(0x03" "$JAVA/ActiveLabActivity.java"
           grep -q "android.permission.INTERNET" "$APP/app/src/main/AndroidManifest.xml"
           grep -q "android:name=\".DiagnosticsActivity\"" "$APP/app/src/main/AndroidManifest.xml"
           grep -q "android:name=\".ActiveLabActivity\"" "$APP/app/src/main/AndroidManifest.xml"
-          grep -q "versionCode 100" "$APP/app/build.gradle"
-          grep -q "versionName '1.0-unified-lab'" "$APP/app/build.gradle"
+          grep -q "versionCode 110" "$APP/app/build.gradle"
+          grep -q "versionName '1.1-all-or-nothing'" "$APP/app/build.gradle"
           grep -q "applicationId 'com.orbisg28siliconcensus'" "$APP/app/build.gradle"
-          echo "Unified G28 Lab validation passed"
+          echo "Orbis G28 Lab v1.1 all-or-nothing validation passed"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -132,27 +142,27 @@ jobs:
           set -euo pipefail
           APP="android/OrbisG28SiliconCensus/g28_silicon_census"
           mkdir -p dist/source
-          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.0.apk
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.1.apk
           cp -R "$APP"/. dist/source/
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-G28-Lab-v1.0-source.zip .)
-          sha256sum dist/Orbis-G28-Lab-v1.0.apk | tee dist/Orbis-G28-Lab-v1.0.apk.sha256
-          sha256sum dist/Orbis-G28-Lab-v1.0-source.zip
+          (cd dist/source && zip -r ../Orbis-G28-Lab-v1.1-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.1.apk | tee dist/Orbis-G28-Lab-v1.1.apk.sha256
+          sha256sum dist/Orbis-G28-Lab-v1.1-source.zip
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Lab-v1.0
+          name: Orbis-G28-Lab-v1.1
           path: |
-            dist/Orbis-G28-Lab-v1.0.apk
-            dist/Orbis-G28-Lab-v1.0.apk.sha256
+            dist/Orbis-G28-Lab-v1.1.apk
+            dist/Orbis-G28-Lab-v1.1.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Lab-v1.0-source
-          path: dist/Orbis-G28-Lab-v1.0-source.zip
+          name: Orbis-G28-Lab-v1.1-source
+          path: dist/Orbis-G28-Lab-v1.1-source.zip
           if-no-files-found: error
           retention-days: 30
