@@ -1,0 +1,158 @@
+name: Build Orbis G28 Unified Lab
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-lab-v1"]
+    paths:
+      - "android/OrbisG28Unified/**"
+      - ".github/workflows/build-orbis-g28-unified.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisG28Unified/**"
+      - ".github/workflows/build-orbis-g28-unified.yml"
+      - "android/OrbisG28SiliconCensus/**"
+      - "android/OrbisWatchLab/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-unified-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct Silicon Census v0.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28SiliconCensus"
+          APP="$ROOT/g28_silicon_census"
+          rm -rf "$APP"
+          mkdir -p "$APP"
+          cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/g28-silicon-census.tar.xz
+          echo "dedc374e7597e075bb70d8ce0538678650f22c79eab86bca5af9a1f6c5002fff  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/g28-silicon-census.tar.xz -C "$APP"
+          for V in 06 07 08; do
+            base64 -d "$ROOT/patch_v${V}.py.gz.b64" | gzip -d > "/tmp/patch_v${V}.py"
+            python "/tmp/patch_v${V}.py" "$APP"
+          done
+          test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
+          test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/CollectorUserService.java"
+          test -s "$APP/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp"
+
+      - name: Reconstruct Watch OTA Lab v3.25
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAB="android/OrbisWatchLab"
+          cat "$LAB"/app/src/main/java/com/orbiswatchlab/v36/MainActivity.java.v36.gz.part*.b64 \
+            | tr -d '\n\r' \
+            | base64 -d \
+            | gzip -dc \
+            > "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v37_server_appid.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v38_exact_auth.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v39_uppercase_sign.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v310_server_latest.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v311_bootloader_entry.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v312_resilient_discovery.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v313_observed_transport.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v314_write_nr_probe.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v315_protocol_handshake.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v316_official_d5_handshake.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v317_info_after_handshake.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v318_preservation_baseline.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v319_runtime_capability_survey.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v320_multichannel_runtime_diff.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          cat "$LAB/tools/patch_v321_hryfine_protocol_map.py.gz.b64" \
+            | tr -d '\n\r' \
+            | base64 -d \
+            | gzip -dc \
+            > /tmp/patch_v321_hryfine_protocol_map.py
+          python /tmp/patch_v321_hryfine_protocol_map.py "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v322_ack_binlist_audit.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v323_historical_binlist_probe.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v324_diagnostics_par_archaeology.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          python "$LAB/tools/patch_v325_server_side_channel_probe.py" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          test -s "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+          grep -q "Orbis Watch OTA 5610 v3.25" "$LAB/app/src/main/java/com/orbiswatchlab/MainActivity.java"
+
+      - name: Assemble unified APK source
+        shell: bash
+        run: |
+          set -euo pipefail
+          CENSUS="android/OrbisG28SiliconCensus/g28_silicon_census"
+          LAB="android/OrbisWatchLab"
+          python android/OrbisG28Unified/integrate_unified_lab.py "$CENSUS" "$LAB"
+
+      - name: Validate unified scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28SiliconCensus/g28_silicon_census"
+          JAVA="$APP/app/src/main/java/com/orbisg28siliconcensus"
+          grep -q "ORBIS G28 LAB" "$JAVA/MainActivity.java"
+          grep -q "class DiagnosticsActivity" "$JAVA/DiagnosticsActivity.java"
+          grep -q "class ActiveLabActivity" "$JAVA/ActiveLabActivity.java"
+          grep -q "D5/0x0F" "$JAVA/ActiveLabActivity.java"
+          grep -q "D5/0x01" "$JAVA/ActiveLabActivity.java"
+          grep -q "EMERGÊNCIA" "$JAVA/ActiveLabActivity.java"
+          grep -q "Nenhum 0x03, nenhum bloco de firmware e nenhum TX BLE" "$JAVA/ActiveLabActivity.java"
+          grep -q "android.permission.INTERNET" "$APP/app/src/main/AndroidManifest.xml"
+          grep -q "android:name=\".DiagnosticsActivity\"" "$APP/app/src/main/AndroidManifest.xml"
+          grep -q "android:name=\".ActiveLabActivity\"" "$APP/app/src/main/AndroidManifest.xml"
+          grep -q "versionCode 100" "$APP/app/build.gradle"
+          grep -q "versionName '1.0-unified-lab'" "$APP/app/build.gradle"
+          grep -q "applicationId 'com.orbisg28siliconcensus'" "$APP/app/build.gradle"
+          echo "Unified G28 Lab validation passed"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28SiliconCensus/g28_silicon_census clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28SiliconCensus/g28_silicon_census"
+          mkdir -p dist/source
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.0.apk
+          cp -R "$APP"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -r ../Orbis-G28-Lab-v1.0-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.0.apk | tee dist/Orbis-G28-Lab-v1.0.apk.sha256
+          sha256sum dist/Orbis-G28-Lab-v1.0-source.zip
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.0
+          path: |
+            dist/Orbis-G28-Lab-v1.0.apk
+            dist/Orbis-G28-Lab-v1.0.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.0-source
+          path: dist/Orbis-G28-Lab-v1.0-source.zip
+          if-no-files-found: error
+          retention-days: 30
