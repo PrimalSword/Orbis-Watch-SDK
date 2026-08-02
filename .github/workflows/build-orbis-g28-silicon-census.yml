@@ -3,7 +3,7 @@ name: Build Orbis G28 Silicon Census
 on:
   workflow_dispatch:
   push:
-    branches: ["g28-silicon-census-v0-1"]
+    branches: ["g28-silicon-census-v0-2"]
     paths:
       - "android/OrbisG28SiliconCensus/**"
       - ".github/workflows/build-orbis-g28-silicon-census.yml"
@@ -31,12 +31,12 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus"
           cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/g28-silicon-census.tar.xz
-          echo "c987438b4cabd3c4f1a4be13a26efbcb905154100cd3b4e22dc4ce4d1f0fc081  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
+          echo "b6605a81d43fe5a691a0b16e1f76498597f92e3a4a233cf80e32bfd540dd37ba  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
           tar -xJf /tmp/g28-silicon-census.tar.xz -C "$ROOT"
           test -s "$ROOT/g28_silicon_census/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
           test -s "$ROOT/g28_silicon_census/app/src/main/AndroidManifest.xml"
 
-      - name: Validate read-only scope
+      - name: Validate read-only scope and connection race fix
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +55,11 @@ jobs:
               'manufacturer=0x%04X',
               '0x050E',
               '0x0642',
+              '0x314C',
+              "ASCII 'L1'",
+              'claimConnection("scan filtrado")',
+              'Resultado BLE adicional ignorado',
+              'discoverServices retry=',
               'fetchUuidsWithSdp',
               '00002a50',
               'Downloads/OrbisG28SiliconCensus',
@@ -83,8 +88,8 @@ jobs:
           assert source.count('writeDescriptor(') == 2
           assert 'android.permission.BLUETOOTH_SCAN' in manifest
           assert "applicationId 'com.orbisg28siliconcensus'" in gradle
-          assert "versionName '0.1-silicon-census'" in gradle
-          print('Silicon Census read-only scope validated')
+          assert "versionName '0.2-silicon-census'" in gradle
+          print('Silicon Census v0.2 read-only scope and connection fix validated')
           PY
 
       - name: Set up Java 17
@@ -107,27 +112,27 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus/g28_silicon_census"
           mkdir -p dist/source
-          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.1.apk
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.2.apk
           cp -R "$ROOT"/. dist/source/
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.1-source.zip .)
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.1.apk | tee dist/Orbis-G28-Silicon-Census-v0.1.apk.sha256
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.1-source.zip
+          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.2-source.zip .)
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.2.apk | tee dist/Orbis-G28-Silicon-Census-v0.2.apk.sha256
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.2-source.zip
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.1
+          name: Orbis-G28-Silicon-Census-v0.2
           path: |
-            dist/Orbis-G28-Silicon-Census-v0.1.apk
-            dist/Orbis-G28-Silicon-Census-v0.1.apk.sha256
+            dist/Orbis-G28-Silicon-Census-v0.2.apk
+            dist/Orbis-G28-Silicon-Census-v0.2.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.1-source
-          path: dist/Orbis-G28-Silicon-Census-v0.1-source.zip
+          name: Orbis-G28-Silicon-Census-v0.2-source
+          path: dist/Orbis-G28-Silicon-Census-v0.2-source.zip
           if-no-files-found: error
           retention-days: 30
