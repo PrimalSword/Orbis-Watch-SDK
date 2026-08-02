@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus"
           cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/g28-silicon-census.tar.xz
-          echo "c5045794b318f0cdee1ecbb7214e2d2be4251e661da61b70034304bc09ac6ee9  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
+          echo "c987438b4cabd3c4f1a4be13a26efbcb905154100cd3b4e22dc4ce4d1f0fc081  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
           tar -xJf /tmp/g28-silicon-census.tar.xz -C "$ROOT"
           test -s "$ROOT/g28_silicon_census/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
           test -s "$ROOT/g28_silicon_census/app/src/main/AndroidManifest.xml"
