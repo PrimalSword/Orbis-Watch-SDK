@@ -1,0 +1,173 @@
+name: Build Orbis G28 Inferno Sender
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["g28-inferno-sender-v0-2"]
+    paths:
+      - "android/OrbisG28InfernoSender/**"
+      - ".github/workflows/build-orbis-g28-inferno-sender.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisG28InfernoSender/**"
+      - ".github/workflows/build-orbis-g28-inferno-sender.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-inferno-sender:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28InfernoSender"
+          mkdir -p "$ROOT"
+          cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/orbis-g28-inferno-sender.tar.xz
+          echo "0a57dffdbb68ce4f913d9bc18cc71585751ee00c4cdbfbd44e1e36fc1017908e  /tmp/orbis-g28-inferno-sender.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/orbis-g28-inferno-sender.tar.xz -C "$ROOT"
+          test -s "$ROOT/app/src/main/java/com/orbiswatchreplay/MainActivity.java"
+          test -s "$ROOT/app/src/main/assets/watchface_frames.json"
+
+      - name: Validate package, checksums and restricted BLE scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+
+          root = pathlib.Path("android/OrbisG28InfernoSender")
+          package = json.loads((root / "app/src/main/assets/watchface_frames.json").read_text())
+          frames = package["frames"]
+
+          assert len(frames) == 116
+          assert sum(item["kind"] == "data" for item in frames) == 103
+          assert sum(item["kind"] == "checkpoint" for item in frames) == 11
+          assert frames[0]["kind"] == "start"
+          assert frames[-1]["kind"] == "finish"
+          assert max(item["length"] for item in frames) == 235
+
+          all_bytes = b"".join(bytes.fromhex(item["hex"]) for item in frames)
+          wf = b"".join(
+              bytes.fromhex(item["hex"])[1:]
+              for item in frames
+              if item["kind"] == "data"
+          )
+          assert len(wf) == 23913
+          assert hashlib.sha256(wf).hexdigest() == "38baaf71561abe3f7d0c75083a548210b462f7020d09af05ecb111e201a6729e"
+          assert hashlib.sha256(all_bytes).hexdigest() == "96aebb02781fb06f3d77243c288f79b590a852d9d5c51e8828a87953e9f5e05e"
+          assert wf[:2] == b"WF"
+          assert int.from_bytes(wf[12:14], "little") == 240
+          assert int.from_bytes(wf[14:16], "little") == 240
+
+          pointer_positions = [0x2A, 0x3E, 0x52, 0x66]
+          expected_ends = [0x4700, 0x4F39, 0x56DB, 0x5D69]
+          assert [int.from_bytes(wf[p:p+4], "little") for p in pointer_positions] == expected_ends
+          assert wf[0x7A:0x7C] == b"PA"
+          par = wf[0x7A:0x4700]
+          assert len(par) == 18054
+          assert hashlib.sha256(par).hexdigest() == "e7b2a16ea451f278bccb1642984382536893484890ceb4b9bc4a92d2d297a0f9"
+          for offset in (0x4700, 0x4F39, 0x56DB):
+              assert wf[offset:offset+2] == b"PA"
+
+          def crc8(data):
+              crc = 0
+              for value in data:
+                  crc ^= value
+                  for _ in range(8):
+                      crc = (((crc << 1) ^ 0x31) & 0xFF) if crc & 0x80 else ((crc << 1) & 0xFF)
+              return crc
+
+          start = bytes.fromhex(frames[0]["hex"])
+          assert int.from_bytes(start[10:14], "big") == len(wf)
+          assert sum(start[:-1]) & 0xFF == start[-1]
+
+          group = bytearray()
+          whole = bytearray()
+          checkpoints = 0
+          for item in frames[1:-1]:
+              raw = bytes.fromhex(item["hex"])
+              if item["kind"] == "data":
+                  assert raw[0] == 0xD6
+                  group.extend(raw[1:])
+                  whole.extend(raw[1:])
+              elif item["kind"] == "checkpoint":
+                  assert 1 <= len(group) <= 2340
+                  assert raw[3] == 0x02
+                  assert raw[8] == crc8(group)
+                  assert sum(raw[:-1]) & 0xFF == raw[-1]
+                  group.clear()
+                  checkpoints += 1
+              else:
+                  raise AssertionError(item["kind"])
+          assert not group
+          assert checkpoints == 11
+
+          finish = bytes.fromhex(frames[-1]["hex"])
+          assert finish[3] == 0x03
+          assert finish[8] == crc8(whole)
+          assert sum(finish[:-1]) & 0xFF == finish[-1]
+
+          source = (root / "app/src/main/java/com/orbiswatchreplay/MainActivity.java").read_text()
+          for required in ("0000ff00-", "0000ff02-", "0000ff01-", "G28 INFERNO", "EXPECTED_DATA_COUNT = 103"):
+              assert required in source
+          for forbidden in ("000018a8-", "00002aa9-", "6e40ff02-", "DF0006FD130102000101"):
+              assert forbidden not in source
+          assert "handler.postDelayed(this::beginReplay, 80)" in source
+          print("Inferno WF, pointers, hashes, CRC-8 checkpoints and restricted BLE scope validated")
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28InfernoSender clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28InfernoSender"
+          mkdir -p dist/source
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" \
+            dist/Orbis-G28-Inferno-Sender-v0.2.apk
+          cp -R "$ROOT"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          rm -f dist/source/source.part*.b64
+          (cd dist/source && zip -r ../Orbis-G28-Inferno-Sender-v0.2-source.zip .)
+          sha256sum dist/Orbis-G28-Inferno-Sender-v0.2.apk
+          sha256sum dist/Orbis-G28-Inferno-Sender-v0.2-source.zip
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Inferno-Sender-v0.2
+          path: dist/Orbis-G28-Inferno-Sender-v0.2.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Inferno-Sender-v0.2-source
+          path: dist/Orbis-G28-Inferno-Sender-v0.2-source.zip
+          if-no-files-found: error
+          retention-days: 30
