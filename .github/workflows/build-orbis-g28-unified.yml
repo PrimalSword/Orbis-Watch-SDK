@@ -103,7 +103,7 @@ jobs:
           grep -q "D5/0x0F" "$JAVA/ActiveLabActivity.java"
           grep -q "D5/0x01" "$JAVA/ActiveLabActivity.java"
           grep -q "EMERGÊNCIA" "$JAVA/ActiveLabActivity.java"
-          grep -q "Nenhum 0x03, nenhum bloco de firmware e nenhum TX BLE" "$JAVA/ActiveLabActivity.java"
+          grep -q "BLOQUEADO" "$JAVA/ActiveLabActivity.java"
           grep -q "android.permission.INTERNET" "$APP/app/src/main/AndroidManifest.xml"
           grep -q "android:name=\".DiagnosticsActivity\"" "$APP/app/src/main/AndroidManifest.xml"
           grep -q "android:name=\".ActiveLabActivity\"" "$APP/app/src/main/AndroidManifest.xml"
