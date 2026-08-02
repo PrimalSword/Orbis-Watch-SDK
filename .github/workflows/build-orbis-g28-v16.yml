@@ -1,0 +1,174 @@
+name: Build Orbis G28 Lab v1.6 Fixed Checksum Window
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-lab-v1-6-fixed-checksum-window"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v16.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v16.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-v16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore verified v1.5 source snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8840839116/zip" \
+            -o /tmp/v15-source-artifact.zip
+          mkdir -p /tmp/v15-artifact android/OrbisG28V16App
+          unzip -q /tmp/v15-source-artifact.zip -d /tmp/v15-artifact
+          test -s /tmp/v15-artifact/Orbis-G28-Lab-v1.5-source.zip
+          unzip -q /tmp/v15-artifact/Orbis-G28-Lab-v1.5-source.zip -d android/OrbisG28V16App
+          test -s android/OrbisG28V16App/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java
+
+      - name: Apply exact HryFine 10-slot checksum window
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("android/OrbisG28V16App")
+          java = root / "app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java"
+          main = root / "app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
+          gradle = root / "app/build.gradle"
+
+          text = java.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r"    private void sendChecksumGroup\(\) \{.*?\n    \}\n\n    private void sendCurrentBlock\(\)",
+              re.S,
+          )
+          replacement = '''    private void sendChecksumGroup() {
+              FirmwarePart part = currentPart();
+              int blocks = blockCount(part);
+              transferGroupStart = transferBlockIndex;
+              transferGroupCount = Math.min(10, blocks - transferGroupStart);
+
+              // HryFine/Cus5610OTAUtils always allocates ten checksum slots.
+              // In parity mode this is 10 * 8 = 80 bytes, with unused slots zero-filled.
+              int slotSize = parityStyle ? 8 : 4;
+              ByteArrayOutputStream payload = new ByteArrayOutputStream(slotSize * 10);
+              for (int i = 0; i < transferGroupCount; i++) {
+                  byte[] block = blockData(part, transferGroupStart + i);
+                  int[] sums = blockChecksums(block);
+                  writeIntBE(payload, sums[0]);
+                  if (parityStyle) writeIntBE(payload, sums[1]);
+              }
+              while (payload.size() < slotSize * 10) payload.write(0);
+              byte[] payloadBytes = payload.toByteArray();
+
+              byte[] frame = buildOfficial5610Request(0x02, 1, transferGroupStart, 0, payloadBytes);
+              append("TX checksum window oficial part=" + part.mapping
+                      + " start=" + transferGroupStart
+                      + " populated=" + transferGroupCount
+                      + " slots=10 payload_len=" + payloadBytes.length
+                      + " unused_zero=" + (10 - transferGroupCount));
+              enqueueOtaBatch(Collections.singletonList(frame),
+                      () -> append("Janela fixa de checksums enviada; aguardando ACK 40K"));
+          }
+
+          private void sendCurrentBlock()'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"sendChecksumGroup replacement count={count}")
+
+          text = text.replace("ORBIS G28 LAB — RESGATE v1.5", "ORBIS G28 LAB — RESGATE v1.6")
+          text = text.replace("RESGATE v1.5", "RESGATE v1.6")
+          text = text.replace("temporizador serial v1.5", "temporizador serial v1.6")
+          text = text.replace(
+              "CORREÇÃO v1.5: payload 5610 usa exatamente MTU-14; WRITE_NR serial; D6 válido confirma o quadro.",
+              "CORREÇÃO v1.6: janela checksum fixa de 10 slots (80 bytes em paridade), MTU-14 e WRITE_NR serial."
+          )
+          java.write_text(text, encoding="utf-8")
+
+          m = main.read_text(encoding="utf-8")
+          m = m.replace("v1.5 — resgate com fragmentação oficial MTU−14",
+                        "v1.6 — resgate com janela checksum oficial de 10 slots")
+          main.write_text(m, encoding="utf-8")
+
+          g = gradle.read_text(encoding="utf-8")
+          g = g.replace("versionCode 150", "versionCode 160")
+          g = g.replace("versionName '1.5-exact-mtu-minus-14'",
+                        "versionName '1.6-fixed-checksum-window'")
+          gradle.write_text(g, encoding="utf-8")
+          PY
+
+      - name: Validate fixed checksum window
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28V16App"
+          JAVA="$APP/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java"
+          MAIN="$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
+          grep -q "ORBIS G28 LAB — RESGATE v1.6" "$JAVA"
+          grep -q "ByteArrayOutputStream payload = new ByteArrayOutputStream(slotSize \* 10)" "$JAVA"
+          grep -q "slots=10 payload_len=" "$JAVA"
+          grep -q "unused_zero=" "$JAVA"
+          grep -q "while (payload.size() < slotSize \* 10) payload.write(0)" "$JAVA"
+          grep -q "PAYLOAD 5610 OFICIAL: MTU-14=" "$JAVA"
+          grep -q "versionCode 160" "$APP/app/build.gradle"
+          grep -q "versionName '1.6-fixed-checksum-window'" "$APP/app/build.gradle"
+          grep -q "janela checksum oficial de 10 slots" "$MAIN"
+          echo "Orbis G28 Lab v1.6 checksum-window validation passed"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28V16App clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28V16App"
+          mkdir -p dist/source
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.6.apk
+          cp -R "$APP"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -qr ../Orbis-G28-Lab-v1.6-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.6.apk | tee dist/Orbis-G28-Lab-v1.6.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.6
+          path: |
+            dist/Orbis-G28-Lab-v1.6.apk
+            dist/Orbis-G28-Lab-v1.6.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.6-source
+          path: dist/Orbis-G28-Lab-v1.6-source.zip
+          if-no-files-found: error
+          retention-days: 30
