@@ -1,0 +1,129 @@
+name: Build Orbis G28 DOOM Input Mapper
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["g28-doom-input-mapper-v0-1"]
+    paths:
+      - "android/OrbisG28DoomInputMapper/**"
+      - ".github/workflows/build-orbis-g28-doom-input-mapper.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisG28DoomInputMapper/**"
+      - ".github/workflows/build-orbis-g28-doom-input-mapper.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-doom-input-mapper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28DoomInputMapper"
+          cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/orbis-g28-doom-input-mapper.tar.xz
+          echo "fa5891a0aee6a7f6fa675f7afd1190386b5686d296175733341afbd3feab5fbf  /tmp/orbis-g28-doom-input-mapper.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/orbis-g28-doom-input-mapper.tar.xz -C "$ROOT"
+          test -s "$ROOT/app/src/main/java/com/orbisg28doominput/MainActivity.java"
+          test -s "$ROOT/app/src/main/AndroidManifest.xml"
+
+      - name: Validate restricted runtime-capture scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("android/OrbisG28DoomInputMapper")
+          source = (root / "app/src/main/java/com/orbisg28doominput/MainActivity.java").read_text()
+          manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
+          gradle = (root / "app/build.gradle").read_text()
+
+          required = (
+              '41:42:99:10:58:57',
+              '6e400001-b5a3-f393-e0a9-e50e24dcca9f',
+              '0000ff14-0000-1000-8000-00805f9b34fb',
+              '0000ff01-0000-1000-8000-00805f9b34fb',
+              'buildNusFrame(0xF3',
+              'command == 0x0C',
+              'Downloads/OrbisG28DoomInputMapper',
+              'requestMtu(247)',
+          )
+          for token in required:
+              assert token in source, token
+
+          forbidden = (
+              '000018a8-',
+              '00002aa9-',
+              '6e40ff01-',
+              '6e40ff02-',
+              'watchface_frames',
+              'rawToPar',
+              'WRITE_FF02',
+              'requestStartOTA',
+              'buildOfficial5610Request',
+              'DF0006FD130102000101',
+          )
+          for token in forbidden:
+              assert token not in source, token
+
+          assert source.count('writeCharacteristic(') == 2
+          assert source.count('writeDescriptor(') == 2
+          assert 'android.permission.BLUETOOTH_SCAN' in manifest
+          assert 'applicationId "com.orbisg28doominput"' in gradle
+          assert 'versionName "0.1-doom-input-mapper"' in gradle
+          print('Runtime-only input mapper scope validated')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28DoomInputMapper clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="android/OrbisG28DoomInputMapper"
+          mkdir -p dist/source
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-DOOM-Input-Mapper-v0.1.apk
+          cp -R "$ROOT"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          rm -f dist/source/source.part*.b64
+          (cd dist/source && zip -r ../Orbis-G28-DOOM-Input-Mapper-v0.1-source.zip .)
+          sha256sum dist/Orbis-G28-DOOM-Input-Mapper-v0.1.apk
+          sha256sum dist/Orbis-G28-DOOM-Input-Mapper-v0.1-source.zip
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-DOOM-Input-Mapper-v0.1
+          path: dist/Orbis-G28-DOOM-Input-Mapper-v0.1.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-DOOM-Input-Mapper-v0.1-source
+          path: dist/Orbis-G28-DOOM-Input-Mapper-v0.1-source.zip
+          if-no-files-found: error
+          retention-days: 30
