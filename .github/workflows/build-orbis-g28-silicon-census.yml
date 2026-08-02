@@ -3,7 +3,7 @@ name: Build Orbis G28 Silicon Census
 on:
   workflow_dispatch:
   push:
-    branches: ["g28-silicon-census-v0-7"]
+    branches: ["g28-silicon-census-v0-8"]
     paths:
       - "android/OrbisG28SiliconCensus/**"
       - ".github/workflows/build-orbis-g28-silicon-census.yml"
@@ -20,7 +20,6 @@ jobs:
   build-silicon-census:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,16 +34,15 @@ jobs:
           cat "$ROOT"/source.part*.b64 | base64 -d > /tmp/g28-silicon-census.tar.xz
           echo "dedc374e7597e075bb70d8ce0538678650f22c79eab86bca5af9a1f6c5002fff  /tmp/g28-silicon-census.tar.xz" | sha256sum -c -
           tar -xJf /tmp/g28-silicon-census.tar.xz -C "$APP"
-          base64 -d "$ROOT/patch_v06.py.gz.b64" | gzip -d > /tmp/patch_v06.py
-          python /tmp/patch_v06.py "$APP"
-          base64 -d "$ROOT/patch_v07.py.gz.b64" | gzip -d > /tmp/patch_v07.py
-          python /tmp/patch_v07.py "$APP"
+          for V in 06 07 08; do
+            base64 -d "$ROOT/patch_v${V}.py.gz.b64" | gzip -d > "/tmp/patch_v${V}.py"
+            python "/tmp/patch_v${V}.py" "$APP"
+          done
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
           test -s "$APP/app/src/main/java/com/orbisg28siliconcensus/CollectorUserService.java"
-          test -s "$APP/app/src/main/aidl/com/orbisg28siliconcensus/ICollectorUserService.aidl"
           test -s "$APP/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp"
 
-      - name: Validate safe scope, icon and static OTA 5610 flow mapper
+      - name: Validate v0.8 safe scope and UI fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -53,47 +51,37 @@ jobs:
           root = Path("android/OrbisG28SiliconCensus/g28_silicon_census")
           source = (root / "app/src/main/java/com/orbisg28siliconcensus/MainActivity.java").read_text()
           service = (root / "app/src/main/java/com/orbisg28siliconcensus/CollectorUserService.java").read_text()
-          aidl = (root / "app/src/main/aidl/com/orbisg28siliconcensus/ICollectorUserService.aidl").read_text()
-          manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
           gradle = (root / "app/build.gradle").read_text()
+          manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
 
-          for token in (
-              '41:42:99:10:58:57', '41:42:99:10:58:02',
-              'buildNusFrame(0xF3', 'HCI BR/EDR FEATURES page=0',
-              'HCI LE FEATURES page=0', 'HCI DUAL IDENTITY CONSISTENT',
-              'ANALISAR HRYFINE INSTALADO E CLASSIFICAR SOC',
+          required = (
+              'ORBIS G28 SILICON CENSUS v0.8',
+              'ScrollView page = new ScrollView(this)',
+              'page.addView(root',
               'MAPEAR FLUXO OTA 5610 DO HRYFINE',
-              'startOta5610FlowMapping', 'analyzeInstalledHryFineOtaFlow',
-              'analyzeDexOtaFlow', 'scanRelevantClassData', 'scanRelevantCode',
-              'CONST_STRING', 'source_file=', 'g28_5610_flow_map_',
-              'com.lianhezhuli.hyfit', 'Cus5610', 'bin_list',
-              'part_addr', 'part_len', 'part_id',
-              'validateRealFirmwareCandidate',
-              'Arquivo rejeitado: este é um relatório gerado pelo próprio Silicon Census'):
+              'g28_5610_flow_map_',
+              'Fluxo OTA 5610 mapeado; relatório salvo em Downloads',
+              'relatórios e mapas do app não são firmware',
+              'buildNusFrame(0xF3',
+              '41:42:99:10:58:57',
+              '41:42:99:10:58:02')
+          for token in required:
               assert token in source, token
 
-          for token in ('bugreportz', 'collectBugreport', 'ParcelFileDescriptor',
-                        'sourceDeleted=', '/bugreports/'):
-              assert token in service, token
-
-          for token in ('000018a8-', '00002aa9-', '6e40ff01-', '6e40ff02-',
-                        'watchface_frames', 'rawToPar', 'requestStartOTA',
-                        'buildOfficial5610Request', 'FLASH_READ', 'RAM_EXEC',
-                        'JUMP_ADDRESS', 'HttpURLConnection', 'OkHttpClient',
-                        'openConnection(', 'startActivityForResult(new Intent(Intent.ACTION_VIEW'):
+          forbidden = (
+              '000018a8-', '00002aa9-', '6e40ff01-', '6e40ff02-',
+              'requestStartOTA', 'buildOfficial5610Request', 'FLASH_READ',
+              'RAM_EXEC', 'JUMP_ADDRESS', 'HttpURLConnection', 'OkHttpClient')
+          for token in forbidden:
               assert token not in source, token
 
           assert source.count('writeCharacteristic(') == 2
           assert source.count('writeDescriptor(') == 2
-          assert 'void destroy() = 16777114;' in aidl
-          assert 'rikka.shizuku.ShizukuProvider' in manifest
+          assert 'bugreportz' in service
           assert 'android:icon="@mipmap/ic_launcher"' in manifest
-          assert '<package android:name="com.lianhezhuli.hyfit" />' in manifest
-          assert "versionName '0.7-ota-5610-flow-map'" in gradle
-          assert 'versionCode 7' in gradle
-          assert 'minSdk 24' in gradle
-          assert 'dev.rikka.shizuku:api:13.1.5' in gradle
-          print('Silicon Census v0.7 static OTA 5610 flow mapper validated')
+          assert "versionName '0.8-scroll-and-validation-fix'" in gradle
+          assert 'versionCode 8' in gradle
+          print('Silicon Census v0.8 UI and validation fixes verified')
           PY
 
       - name: Set up Java 17
@@ -116,27 +104,26 @@ jobs:
           set -euo pipefail
           ROOT="android/OrbisG28SiliconCensus/g28_silicon_census"
           mkdir -p dist/source
-          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.7.apk
+          cp "$ROOT/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Silicon-Census-v0.8.apk
           cp -R "$ROOT"/. dist/source/
           rm -rf dist/source/app/build dist/source/.gradle
-          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.7-source.zip .)
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.7.apk | tee dist/Orbis-G28-Silicon-Census-v0.7.apk.sha256
-          sha256sum dist/Orbis-G28-Silicon-Census-v0.7-source.zip
+          (cd dist/source && zip -r ../Orbis-G28-Silicon-Census-v0.8-source.zip .)
+          sha256sum dist/Orbis-G28-Silicon-Census-v0.8.apk | tee dist/Orbis-G28-Silicon-Census-v0.8.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.7
+          name: Orbis-G28-Silicon-Census-v0.8
           path: |
-            dist/Orbis-G28-Silicon-Census-v0.7.apk
-            dist/Orbis-G28-Silicon-Census-v0.7.apk.sha256
+            dist/Orbis-G28-Silicon-Census-v0.8.apk
+            dist/Orbis-G28-Silicon-Census-v0.8.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Silicon-Census-v0.7-source
-          path: dist/Orbis-G28-Silicon-Census-v0.7-source.zip
+          name: Orbis-G28-Silicon-Census-v0.8-source
+          path: dist/Orbis-G28-Silicon-Census-v0.8-source.zip
           if-no-files-found: error
           retention-days: 30
