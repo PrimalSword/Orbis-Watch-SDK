@@ -5,12 +5,12 @@ on:
   push:
     branches: ["orbis-g28-lab-v1-3-bootloader-rescue"]
     paths:
-      - "android/OrbisG28Unified/patch_v13_bootloader_rescue.patch.gz.b64"
+      - "android/OrbisG28Unified/v13chunks/**"
       - ".github/workflows/build-orbis-g28-v13.yml"
   pull_request:
     branches: ["main"]
     paths:
-      - "android/OrbisG28Unified/patch_v13_bootloader_rescue.patch.gz.b64"
+      - "android/OrbisG28Unified/v13chunks/**"
       - ".github/workflows/build-orbis-g28-v13.yml"
 
 permissions:
@@ -46,8 +46,20 @@ jobs:
       - name: Apply v1.3 bootloader rescue patch
         run: |
           set -euo pipefail
-          base64 -d android/OrbisG28Unified/patch_v13_bootloader_rescue.patch.gz.b64 \
-            | gzip -dc > /tmp/patch_v13_bootloader_rescue.patch
+          CHUNKS="android/OrbisG28Unified/v13chunks"
+          echo "a75896dc6900c55048f72757864ff1e22b8d3be818f48f84474fb51c3cad0a80  $CHUNKS/chunk00.b64" | sha256sum -c -
+          echo "16962f43a26625dc120d418e58ff2218e78484665c0a572b7e20e9c4c93ae630  $CHUNKS/chunk01.b64" | sha256sum -c -
+          echo "80f3eaec4d0d6cc8c0653ce1fd352393e081ea02646776974265badc73a5f142  $CHUNKS/chunk02.b64" | sha256sum -c -
+          echo "ae9049e2cf2732730c22db863bc549bc9b7e1d81d0bd63474286308511c32a1b  $CHUNKS/chunk03.b64" | sha256sum -c -
+          echo "fc407ecc4e81539d265851f6ed7789961c2372b032edaf20e8c2fd5c0af11c67  $CHUNKS/chunk04.b64" | sha256sum -c -
+          echo "655107da2e989a3f38a452c30bb8ca7ea64c7b48b3e00877d1dea075fed32125  $CHUNKS/chunk05.b64" | sha256sum -c -
+          echo "b16f70ed279a24932fdbbd00a0e71afca34bffe985833177270601e63de0fa40  $CHUNKS/chunk06.b64" | sha256sum -c -
+          echo "cc0eca1e76688050e56b93594eee3e270182fb04431a404aa80e3a010478d6d7  $CHUNKS/chunk07.b64" | sha256sum -c -
+          echo "d444b018377c40c7c73773952b40a58c803992d98a5fa3cf1bdd33aebcab842e  $CHUNKS/chunk08.b64" | sha256sum -c -
+          echo "59f684101347ac33a4d4110e702802199b21ed8a1da4d7eee0f24697d6852726  $CHUNKS/chunk09.b64" | sha256sum -c -
+          cat "$CHUNKS"/chunk*.b64 > /tmp/patch_v13_bootloader_rescue.patch.gz.b64
+          echo "97a2c65d25a01fb6b76bbb4644c95f3e8a644f55a27ea750765a3029cf04bdee  /tmp/patch_v13_bootloader_rescue.patch.gz.b64" | sha256sum -c -
+          base64 -d /tmp/patch_v13_bootloader_rescue.patch.gz.b64 | gzip -dc > /tmp/patch_v13_bootloader_rescue.patch
           cd android/OrbisG28V13App
           patch -p1 < /tmp/patch_v13_bootloader_rescue.patch
 
