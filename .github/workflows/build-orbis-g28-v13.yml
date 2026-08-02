@@ -6,11 +6,13 @@ on:
     branches: ["orbis-g28-lab-v1-3-bootloader-rescue"]
     paths:
       - "android/OrbisG28Unified/v13chunks/**"
+      - "android/OrbisG28Unified/patch_v13_postfinish_scan.py"
       - ".github/workflows/build-orbis-g28-v13.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "android/OrbisG28Unified/v13chunks/**"
+      - "android/OrbisG28Unified/patch_v13_postfinish_scan.py"
       - ".github/workflows/build-orbis-g28-v13.yml"
 
 permissions:
@@ -62,6 +64,8 @@ jobs:
           base64 -d /tmp/patch_v13_bootloader_rescue.patch.gz.b64 | gzip -dc > /tmp/patch_v13_bootloader_rescue.patch
           cd android/OrbisG28V13App
           patch -p1 < /tmp/patch_v13_bootloader_rescue.patch
+          cd "$GITHUB_WORKSPACE"
+          python android/OrbisG28Unified/patch_v13_postfinish_scan.py android/OrbisG28V13App
 
       - name: Validate rescue transport and scope
         run: |
@@ -79,6 +83,9 @@ jobs:
           grep -q "otaTxQueue.peekFirst" "$JAVA"
           grep -q "expectedFragments > 256" "$JAVA"
           grep -q "startPostRescueRuntimeScan" "$JAVA"
+          grep -q "!emergencyStopped && !bootloaderRescueMode" "$JAVA"
+          grep -q "otaTransitionScanArmed = false" "$JAVA"
+          grep -q "otaReconnectInProgress = false" "$JAVA"
           grep -q "RESGATAR G28 PRESO NO BOOTLOADER .02" "$MAIN"
           ! grep -q "Math.max(20, Math.min(240, negotiatedMtu - 14))" "$JAVA"
           grep -q "versionCode 130" "$APP/app/build.gradle"
