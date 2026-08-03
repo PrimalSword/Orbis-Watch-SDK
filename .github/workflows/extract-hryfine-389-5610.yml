@@ -51,16 +51,21 @@ jobs:
           unzip -q work/jadx.zip -d work/jadx
           work/jadx/bin/jadx --version | tee -a out/apk-info.txt
 
-      - name: Decompile classes6.dex
+      - name: Decompile classes6.dex and preserve partial output
         run: |
           set -euo pipefail
+          set +e
           work/jadx/bin/jadx \
             --show-bad-code \
             --deobf \
             --threads-count 4 \
             -d work/decompiled \
-            work/classes6.dex
+            work/classes6.dex 2>&1 | tee out/jadx.log
+          JEXIT=${PIPESTATUS[0]}
+          set -e
+          echo "jadx_exit=$JEXIT" | tee -a out/apk-info.txt
           ROOT=work/decompiled/sources/com/lianhezhuli/hyfit/ble/ota
+          find work/decompiled/sources -type f | grep -E 'Cus5610|OtaBean' | sort | tee out/found-files.txt
           test -s "$ROOT/Cus5610OTAUtils.java"
           test -s "$ROOT/Cus5610OTANotifyWriteUtils.java"
           test -s "$ROOT/Cus5610CommandUtils.java"
@@ -73,8 +78,8 @@ jobs:
           grep -nE 'funbinFile|sendFileByteListNext|sendTen4kByteNext|on4kCheckRst|on40kCheckRst|onPartTotalCheckRst|generalSendBytes|check|sum|total|0x0A|case 10' \
             out/Cus5610OTAUtils.java out/Cus5610OTANotifyWriteUtils.java out/Cus5610CommandUtils.java \
             > out/relevant-lines.txt || true
-          sed -n '1,320p' out/Cus5610OTAUtils.java > out/Cus5610OTAUtils-head.txt
-          zip -j out/HryFine-5610-extracted.zip out/*.java out/*.txt
+          sed -n '1,420p' out/Cus5610OTAUtils.java > out/Cus5610OTAUtils-head.txt
+          zip -j out/HryFine-5610-extracted.zip out/*.java out/*.txt out/jadx.log
 
       - name: Upload extracted methods
         uses: actions/upload-artifact@v4
