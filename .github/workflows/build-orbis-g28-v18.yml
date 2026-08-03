@@ -1,0 +1,182 @@
+name: Build Orbis G28 Lab v1.8 Valid Dial Command
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-lab-v1-8-valid-dial-command"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v18.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v18.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-v18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore verified v1.7 source snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8841304373/zip" \
+            -o /tmp/v17-source-artifact.zip
+          mkdir -p /tmp/v17-artifact android/OrbisG28V18App
+          unzip -q /tmp/v17-source-artifact.zip -d /tmp/v17-artifact
+          test -s /tmp/v17-artifact/Orbis-G28-Lab-v1.7-source.zip
+          unzip -q /tmp/v17-artifact/Orbis-G28-Lab-v1.7-source.zip -d android/OrbisG28V18App
+          test -s android/OrbisG28V18App/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java
+
+      - name: Apply valid dial-area command and callback-driven queue
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root=Path('android/OrbisG28V18App')
+          java=root/'app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java'
+          main=root/'app/src/main/java/com/orbisg28siliconcensus/MainActivity.java'
+          gradle=root/'app/build.gradle'
+          text=java.read_text(encoding='utf-8')
+
+          replacements={
+            'private int allOrNothingPartId = 0x7E;':'private int allOrNothingPartId = 0x09;',
+            'ORBIS G28 LAB — RESGATE v1.7':'ORBIS G28 LAB — RESGATE v1.8',
+            'part_id 0x7E':'part_id 0x09 (área oficial de mostrador)',
+            'partição 0x7E em 0x003F0000':'partição 0x09 (mostrador) em 0x003F0000',
+            'allOrNothingPartId = 0x7E;':'allOrNothingPartId = 0x09;',
+            'preset bloqueado: part_id=0x7E address=0x003F0000 length=4096 finalize_0x0E=true':'preset bloqueado: part_id=0x09 (FUN_DIAL_AREA) address=0x003F0000 length=4096 finalize_0x0E=true',
+            'CORREÇÃO v1.7: semântica oficial do callback 4K; status raw 0x07 não interrompe a fila D5/0x0A.':'CORREÇÃO v1.8: comando de dados 0x09 FUN_DIAL_AREA; WRITE_NR avança somente por callback GATT status=0.',
+            'ORBIS_G28_BT8918C_FLASH_PROBE_V1\\0':'ORBIS_G28_DIAL_AREA_FLASH_PROBE_V2\\0',
+            'RESGATE v1.7:':'RESGATE v1.8:',
+            'WRITE_NR serial temporizado v1.7':'watchdog WRITE_NR v1.8',
+          }
+          for old,new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing replacement anchor: {old}')
+              text=text.replace(old,new)
+
+          old='''                if (otaLastWriteNoResponse) {
+                    append("OTA WRITE_NR callback informativo ignorado status=" + status
+                            + "; conclusão será feita por D6 correspondente ou pelo temporizador serial v1.6");
+                    return;
+                }'''
+          new='''                if (otaLastWriteNoResponse) {
+                    if (status == BluetoothGatt.GATT_SUCCESS) {
+                        otaWriteToken++;
+                        otaWriteBusy = false;
+                        completeOtaWriteSuccess("callback GATT WRITE_NR v1.8");
+                    } else {
+                        TxItem pending = otaInFlight;
+                        if (pending != null && isFlashDataFrame(pending.data)) {
+                            otaWriteToken++;
+                            otaWriteBusy = false;
+                            retryOrStopOtaWrite("callback WRITE_NR de dados status=" + status);
+                        } else {
+                            append("OTA WRITE_NR controle status=" + status
+                                    + "; aguardando D6 correspondente antes de repetir.");
+                        }
+                    }
+                    return;
+                }'''
+          if old not in text:
+              raise SystemExit('onCharacteristicWrite anchor missing')
+          text=text.replace(old,new,1)
+
+          old_timer='''            if (otaLastWriteNoResponse) {
+                schedule(140, () -> {
+                    if (otaWriteBusy && otaWriteToken == writeToken) {
+                        otaWriteToken++;
+                        otaWriteBusy = false;
+                        completeOtaWriteSuccess("watchdog WRITE_NR v1.8");
+                    }
+                });
+            } else {'''
+          new_timer='''            if (otaLastWriteNoResponse) {
+                schedule(3_500, () -> {
+                    if (otaWriteBusy && otaWriteToken == writeToken) {
+                        otaWriteBusy = false;
+                        retryOrStopOtaWrite("timeout aguardando callback WRITE_NR status=0");
+                    }
+                });
+            } else {'''
+          if old_timer not in text:
+              raise SystemExit('WRITE_NR timer anchor missing')
+          text=text.replace(old_timer,new_timer,1)
+
+          java.write_text(text,encoding='utf-8')
+
+          m=main.read_text(encoding='utf-8')
+          oldm='v1.7 — resgate com callback 4K idêntico ao HryFine'
+          if oldm not in m: raise SystemExit('MainActivity version anchor missing')
+          m=m.replace(oldm,'v1.8 — comando oficial de mostrador e fila por callback GATT')
+          main.write_text(m,encoding='utf-8')
+
+          g=gradle.read_text(encoding='utf-8')
+          g=g.replace('versionCode 170','versionCode 180')
+          g=g.replace("versionName '1.7-official-4k-callback'","versionName '1.8-valid-dial-command'")
+          gradle.write_text(g,encoding='utf-8')
+          PY
+
+      - name: Validate v1.8 protocol changes
+        run: |
+          set -euo pipefail
+          APP=android/OrbisG28V18App
+          JAVA="$APP/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java"
+          grep -q 'allOrNothingPartId = 0x09' "$JAVA"
+          grep -q 'FUN_DIAL_AREA' "$JAVA"
+          grep -q 'ORBIS_G28_DIAL_AREA_FLASH_PROBE_V2' "$JAVA"
+          grep -q 'callback GATT WRITE_NR v1.8' "$JAVA"
+          grep -q 'timeout aguardando callback WRITE_NR status=0' "$JAVA"
+          grep -q 'D6/0x02 curto' "$JAVA"
+          grep -q 'PAYLOAD 5610 OFICIAL: MTU-14=' "$JAVA"
+          grep -q 'slots=10 payload_len=' "$JAVA"
+          ! grep -q 'allOrNothingPartId = 0x7E' "$JAVA"
+          grep -q 'versionCode 180' "$APP/app/build.gradle"
+          grep -q "versionName '1.8-valid-dial-command'" "$APP/app/build.gradle"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28V18App clean assembleDebug --stacktrace
+      - name: Package outputs
+        run: |
+          set -euo pipefail
+          APP=android/OrbisG28V18App
+          mkdir -p dist/source
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.8.apk
+          cp -R "$APP"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -qr ../Orbis-G28-Lab-v1.8-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.8.apk | tee dist/Orbis-G28-Lab-v1.8.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.8
+          path: |
+            dist/Orbis-G28-Lab-v1.8.apk
+            dist/Orbis-G28-Lab-v1.8.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.8-source
+          path: dist/Orbis-G28-Lab-v1.8-source.zip
+          if-no-files-found: error
+          retention-days: 30
