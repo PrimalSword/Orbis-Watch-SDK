@@ -6,6 +6,10 @@ on:
     branches: ["g28-query-v0-9"]
     paths:
       - ".github/workflows/query-g28-v0-9.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/query-g28-v0-9.yml"
 
 permissions:
   contents: read
