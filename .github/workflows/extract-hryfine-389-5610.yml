@@ -1,0 +1,81 @@
+name: Extract HryFine 3.8.9 5610 methods
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["hryfine-389-extract-5610-methods"]
+    paths:
+      - ".github/workflows/extract-hryfine-389-5610.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download current HryFine APK
+        run: |
+          set -euo pipefail
+          mkdir -p work out
+          curl --fail --location --retry 5 --retry-all-errors \
+            --user-agent "Mozilla/5.0" \
+            "https://d.apkpure.net/b/APK/com.lianhezhuli.hyfit?version=latest" \
+            -o work/HryFine.apk
+          file work/HryFine.apk
+          test "$(head -c 2 work/HryFine.apk)" = "PK"
+          stat -c 'apk_bytes=%s' work/HryFine.apk | tee out/apk-info.txt
+          sha256sum work/HryFine.apk | tee -a out/apk-info.txt
+          unzip -l work/HryFine.apk | grep -E 'classes[0-9]*\.dex' | tee -a out/apk-info.txt
+          unzip -p work/HryFine.apk classes6.dex > work/classes6.dex
+          test -s work/classes6.dex
+
+      - name: Download JADX
+        run: |
+          set -euo pipefail
+          URL=$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest \
+            | jq -r '.assets[] | select(.name | test("jadx-[0-9.]+\\.zip$")) | .browser_download_url' \
+            | head -n 1)
+          test -n "$URL"
+          echo "jadx_url=$URL" | tee -a out/apk-info.txt
+          curl --fail --location --retry 5 "$URL" -o work/jadx.zip
+          mkdir -p work/jadx
+          unzip -q work/jadx.zip -d work/jadx
+          work/jadx/bin/jadx --version | tee -a out/apk-info.txt
+
+      - name: Decompile classes6.dex
+        run: |
+          set -euo pipefail
+          work/jadx/bin/jadx \
+            --show-bad-code \
+            --deobf \
+            --threads-count 4 \
+            -d work/decompiled \
+            work/classes6.dex
+          ROOT=work/decompiled/sources/com/lianhezhuli/hyfit/ble/ota
+          test -s "$ROOT/Cus5610OTAUtils.java"
+          test -s "$ROOT/Cus5610OTANotifyWriteUtils.java"
+          test -s "$ROOT/Cus5610CommandUtils.java"
+          cp "$ROOT/Cus5610OTAUtils.java" out/
+          cp "$ROOT/Cus5610OTANotifyWriteUtils.java" out/
+          cp "$ROOT/Cus5610CommandUtils.java" out/
+          if [ -f work/decompiled/sources/com/lianhezhuli/hyfit/ble/bean/OtaBean.java ]; then
+            cp work/decompiled/sources/com/lianhezhuli/hyfit/ble/bean/OtaBean.java out/
+          fi
+          grep -nE 'funbinFile|sendFileByteListNext|sendTen4kByteNext|on4kCheckRst|on40kCheckRst|onPartTotalCheckRst|generalSendBytes|check|sum|total|0x0A|case 10' \
+            out/Cus5610OTAUtils.java out/Cus5610OTANotifyWriteUtils.java out/Cus5610CommandUtils.java \
+            > out/relevant-lines.txt || true
+          sed -n '1,260p' out/Cus5610OTAUtils.java > out/Cus5610OTAUtils-head.txt
+          zip -j out/HryFine-5610-extracted.zip out/*.java out/*.txt
+
+      - name: Upload extracted methods
+        uses: actions/upload-artifact@v4
+        with:
+          name: HryFine-3.8.9-5610-extracted
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
