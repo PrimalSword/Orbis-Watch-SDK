@@ -1,0 +1,99 @@
+name: Query G28 OTA as V0.9
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["g28-query-v0-9"]
+    paths:
+      - ".github/workflows/query-g28-v0-9.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  query-v09:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Query signed get_update and force_update
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import random
+          import subprocess
+          import time
+          from pathlib import Path
+
+          # Real G28 identity, changing only ASCII firmware V1.5 -> V0.9.
+          # 68 00 A4 B0 04 | 56 30 2E 39 | 03 | 47 32 38
+          unique_code = '6800A4B00456302E3903473238'
+          base = {
+              'appid': 'oaa648257e8',
+              'bundle_id': '3',
+              'lang': 'pt',
+              'nonce': str(random.randrange(1048576) + 10000),
+              'unique_code': unique_code,
+              'timestamp': str(int(time.time())),
+          }
+          canonical = ''.join(
+              f'{key}={base[key]}&'
+              for key in sorted(base)
+              if base[key] and base[key] != 'null'
+          ) + 'key=ead8ff5fe2f9385b55e6e509cf311a35'
+          params = dict(base)
+          params['sign'] = hashlib.md5(canonical.encode()).hexdigest().upper()
+
+          result = {
+              'simulated_version': 'V0.9',
+              'unique_code': unique_code,
+              'read_only': True,
+              'ble_used': False,
+              'firmware_downloaded': False,
+              'responses': {},
+          }
+
+          for endpoint in ('get_update', 'force_update'):
+              body_path = Path(f'out/{endpoint}.body.json')
+              headers_path = Path(f'out/{endpoint}.headers.txt')
+              cmd = [
+                  'curl', '--silent', '--show-error', '--location',
+                  '--connect-timeout', '20', '--max-time', '60', '--get',
+                  '--user-agent', 'okhttp/4.9.2',
+                  '--header', 'Accept: application/json',
+                  '--dump-header', str(headers_path),
+                  '--output', str(body_path),
+                  '--write-out', '%{http_code}',
+                  f'https://ota.lianhezhuli.com/api/hry/{endpoint}',
+              ]
+              for key, value in params.items():
+                  cmd += ['--data-urlencode', f'{key}={value}']
+              completed = subprocess.run(cmd, capture_output=True, text=True)
+              body = body_path.read_text(errors='replace') if body_path.exists() else ''
+              try:
+                  parsed = json.loads(body)
+              except Exception:
+                  parsed = body
+              result['responses'][endpoint] = {
+                  'curl_exit': completed.returncode,
+                  'http_code': completed.stdout.strip(),
+                  'body': parsed,
+                  'stderr': completed.stderr,
+              }
+              print(endpoint, completed.returncode, completed.stdout.strip(), body)
+
+          Path('out/request.json').write_text(json.dumps(params, indent=2), encoding='utf-8')
+          Path('out/result.json').write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
+          PY
+
+      - name: Upload V0.9 responses
+        uses: actions/upload-artifact@v4
+        with:
+          name: G28-V0.9-official-OTA-responses
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
