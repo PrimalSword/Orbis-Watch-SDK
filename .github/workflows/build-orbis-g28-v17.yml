@@ -1,0 +1,110 @@
+name: Build Orbis G28 Lab v1.7 Official 4K Callback Semantics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-lab-v1-7-official-4k-callback"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v17.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v17.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-v17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore verified v1.6 source snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8840999839/zip" \
+            -o /tmp/v16-source-artifact.zip
+          mkdir -p /tmp/v16-artifact android/OrbisG28V17App
+          unzip -q /tmp/v16-source-artifact.zip -d /tmp/v16-artifact
+          test -s /tmp/v16-artifact/Orbis-G28-Lab-v1.6-source.zip
+          unzip -q /tmp/v16-artifact/Orbis-G28-Lab-v1.6-source.zip -d android/OrbisG28V17App
+          test -s android/OrbisG28V17App/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java
+
+      - name: Apply official HryFine 4K callback semantics
+        env:
+          PATCH_B64: "ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpyb290ID0gUGF0aCgiYW5kcm9pZC9PcmJpc0cyOFYxN0FwcCIpCmphdmEgPSByb290IC8gImFwcC9zcmMvbWFpbi9qYXZhL2NvbS9vcmJpc2cyOHNpbGljb25jZW5zdXMvQWN0aXZlTGFiQWN0aXZpdHkuamF2YSIKbWFpbiA9IHJvb3QgLyAiYXBwL3NyYy9tYWluL2phdmEvY29tL29yYmlzZzI4c2lsaWNvbmNlbnN1cy9NYWluQWN0aXZpdHkuamF2YSIKZ3JhZGxlID0gcm9vdCAvICJhcHAvYnVpbGQuZ3JhZGxlIgoKdGV4dCA9IGphdmEucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCgpvbGRfcGFyc2UgPSAiIiIgICAgICAgIGlmIChzdGF0dXMgPT0gMSkgY29tcGxldGVNYXRjaGluZ090YVdyaXRlRnJvbUQ2KGNvbW1hbmQpOwoKICAgICAgICBpZiAoY29tbWFuZCA9PSAweDBGICYmIHN0YXR1cyA9PSAxKSB7IiIiCm5ld19wYXJzZSA9ICIiIiAgICAgICAgLy8gRXhhY3QgSHJ5RmluZSAzLjguOSBkaXNwYXRjaGVyIHNlbWFudGljczoKICAgICAgICAvLyBhIDktYnl0ZSBENi8weDAyIHJlc3BvbnNlIGhhcyBubyBwYXlsb2FkIGFuZCBpcyByb3V0ZWQgdG8gb240a0NoZWNrUnN0KCksCiAgICAgICAgLy8gZXZlbiB3aGVuIGJ5dGUgMyBpcyAweDA3LiBUaGUgb2ZmaWNpYWwgY2xpZW50IHRoZW4gY29udGludWVzIHRoZSBxdWV1ZS4KICAgICAgICBib29sZWFuIG9mZmljaWFsNGtDYWxsYmFjayA9IGNvbW1hbmQgPT0gMHgwMgogICAgICAgICAgICAgICAgJiYgdHJhbnNmZXJNb2RlICE9IFRyYW5zZmVyTW9kZS5OT05FCiAgICAgICAgICAgICAgICAmJiB0cmFuc2ZlclN0YWdlID09IFRyYW5zZmVyU3RhZ2UuV0FJVF9CTE9DS19BQ0sKICAgICAgICAgICAgICAgICYmIHBheWxvYWQubGVuZ3RoID09IDA7CiAgICAgICAgaWYgKHN0YXR1cyA9PSAxIHx8IG9mZmljaWFsNGtDYWxsYmFjaykgewogICAgICAgICAgICBjb21wbGV0ZU1hdGNoaW5nT3RhV3JpdGVGcm9tRDYoY29tbWFuZCk7CiAgICAgICAgfQogICAgICAgIGlmIChvZmZpY2lhbDRrQ2FsbGJhY2sgJiYgc3RhdHVzICE9IDEpIHsKICAgICAgICAgICAgYXBwZW5kKCJIUllGSU5FIDU2MTA6IEQ2LzB4MDIgY3VydG8gc3RhdHVzPSIgKyBzdGF0dXMKICAgICAgICAgICAgICAgICAgICArICIgZW5jYW1pbmhhZG8gY29tbyBjYWxsYmFjayA0SzsgbsOjbyDDqSBlbmNlcnJhbWVudG8gZmF0YWwgbm8gY2xpZW50ZSBvZmljaWFsLiIpOwogICAgICAgIH0KCiAgICAgICAgaWYgKGNvbW1hbmQgPT0gMHgwRiAmJiBzdGF0dXMgPT0gMSkgeyIiIgppZiBvbGRfcGFyc2Ugbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJwYXJzZU90YUZyYW1lIGFuY2hvciBub3QgZm91bmQiKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKG9sZF9wYXJzZSwgbmV3X3BhcnNlLCAxKQoKb2xkX2dhdGUgPSAiIiIgICAgcHJpdmF0ZSB2b2lkIGhhbmRsZVRyYW5zZmVyUmVzcG9uc2UoaW50IGNvbW1hbmQsIGludCBzdGF0dXMsIGJ5dGVbXSBwYXlsb2FkKSB7CiAgICAgICAgaWYgKHRyYW5zZmVyTW9kZSA9PSBUcmFuc2Zlck1vZGUuTk9ORSkgcmV0dXJuOwogICAgICAgIGlmIChzdGF0dXMgIT0gMSkgewogICAgICAgICAgICBzdG9wVHJhbnNmZXIoIlJlbMOzZ2lvIHJlc3BvbmRldSBlcnJvIGNtZD0weCIgKyBTdHJpbmcuZm9ybWF0KExvY2FsZS5VUywgIiUwMlgiLCBjb21tYW5kKSArICIgc3RhdHVzPSIgKyBzdGF0dXMgKyAiICIgKyBvdGFTdGF0dXMoc3RhdHVzKSk7CiAgICAgICAgICAgIHJldHVybjsKICAgICAgICB9CiAgICAgICAgaWYgKHRyYW5zZmVyU3RhZ2UgPT0gVHJhbnNmZXJTdGFnZS5XQUlUX1RBQkxFX0FDSyAmJiBjb21tYW5kID09IDB4MDMpIHsiIiIKbmV3X2dhdGUgPSAiIiIgICAgcHJpdmF0ZSB2b2lkIGhhbmRsZVRyYW5zZmVyUmVzcG9uc2UoaW50IGNvbW1hbmQsIGludCBzdGF0dXMsIGJ5dGVbXSBwYXlsb2FkKSB7CiAgICAgICAgaWYgKHRyYW5zZmVyTW9kZSA9PSBUcmFuc2Zlck1vZGUuTk9ORSkgcmV0dXJuOwogICAgICAgIGJvb2xlYW4gb2ZmaWNpYWw0a0NhbGxiYWNrID0gdHJhbnNmZXJTdGFnZSA9PSBUcmFuc2ZlclN0YWdlLldBSVRfQkxPQ0tfQUNLCiAgICAgICAgICAgICAgICAmJiBjb21tYW5kID09IDB4MDIKICAgICAgICAgICAgICAgICYmIHBheWxvYWQubGVuZ3RoID09IDA7CiAgICAgICAgaWYgKHN0YXR1cyAhPSAxICYmICFvZmZpY2lhbDRrQ2FsbGJhY2spIHsKICAgICAgICAgICAgc3RvcFRyYW5zZmVyKCJSZWzDs2dpbyByZXNwb25kZXUgZXJybyBjbWQ9MHgiICsgU3RyaW5nLmZvcm1hdChMb2NhbGUuVVMsICIlMDJYIiwgY29tbWFuZCkgKyAiIHN0YXR1cz0iICsgc3RhdHVzICsgIiAiICsgb3RhU3RhdHVzKHN0YXR1cykpOwogICAgICAgICAgICByZXR1cm47CiAgICAgICAgfQogICAgICAgIGlmIChvZmZpY2lhbDRrQ2FsbGJhY2spIHsKICAgICAgICAgICAgYXBwZW5kKCJTRU3Dgk5USUNBIE9GSUNJQUw6IEQ2LzB4MDIgY3VydG8gcmVjZWJpZG8gbm8gZmltIGRvIGJsb2NvOyAiCiAgICAgICAgICAgICAgICAgICAgKyAiSHJ5RmluZSBjaGFtYSBvbjRrQ2hlY2tSc3QoMCkgZSBlbnZpYSBvIHByw7N4aW1vIGl0ZW0gZGEgZmlsYS4iKTsKICAgICAgICB9CiAgICAgICAgaWYgKHRyYW5zZmVyU3RhZ2UgPT0gVHJhbnNmZXJTdGFnZS5XQUlUX1RBQkxFX0FDSyAmJiBjb21tYW5kID09IDB4MDMpIHsiIiIKaWYgb2xkX2dhdGUgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJoYW5kbGVUcmFuc2ZlclJlc3BvbnNlIGdhdGUgYW5jaG9yIG5vdCBmb3VuZCIpCnRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkX2dhdGUsIG5ld19nYXRlLCAxKQoKb2xkX2FjayA9ICIiIiAgICAgICAgfSBlbHNlIGlmICh0cmFuc2ZlclN0YWdlID09IFRyYW5zZmVyU3RhZ2UuV0FJVF9CTE9DS19BQ0sgJiYgY29tbWFuZCA9PSAweDAyKSB7CiAgICAgICAgICAgIGFwcGVuZCgiQUNLIGJsb2NvIHBhcnQ9IiArIGN1cnJlbnRQYXJ0KCkubWFwcGluZyArICIgYmxvY2s9IiArIHRyYW5zZmVyQmxvY2tJbmRleCk7IiIiCm5ld19hY2sgPSAiIiIgICAgICAgIH0gZWxzZSBpZiAodHJhbnNmZXJTdGFnZSA9PSBUcmFuc2ZlclN0YWdlLldBSVRfQkxPQ0tfQUNLICYmIGNvbW1hbmQgPT0gMHgwMikgewogICAgICAgICAgICBhcHBlbmQoIkNBTExCQUNLIDRLIHBhcnQ9IiArIGN1cnJlbnRQYXJ0KCkubWFwcGluZyArICIgYmxvY2s9IiArIHRyYW5zZmVyQmxvY2tJbmRleAogICAgICAgICAgICAgICAgICAgICsgIiBzdGF0dXNfcmF3PSIgKyBzdGF0dXMgKyAiIHBheWxvYWRfbGVuPSIgKyBwYXlsb2FkLmxlbmd0aCk7IiIiCmlmIG9sZF9hY2sgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJibG9jayBBQ0sgYW5jaG9yIG5vdCBmb3VuZCIpCnRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkX2FjaywgbmV3X2FjaywgMSkKCm9sZF9maW5pc2ggPSAiIiIgICAgICAgICAgICAgICAgdHJhbnNmZXJTdGFnZSA9IFRyYW5zZmVyU3RhZ2UuV0FJVF9GSU5JU0hfQUNLOwogICAgICAgICAgICAgICAgZW5xdWV1ZU90YUJhdGNoKENvbGxlY3Rpb25zLnNpbmdsZXRvbkxpc3QoYnVpbGRPZmZpY2lhbDU2MTBSZXF1ZXN0KDB4MEUsIDEsIDAsIDAsIG5ldyBieXRlWzBdKSksICgpIC0+IGFwcGVuZCgiRmluYWxpemHDp8OjbyAweDBFIGVudmlhZGE7IGFndWFyZGFuZG8gcmVzcG9zdGEvcmVib290IikpOyIiIgpuZXdfZmluaXNoID0gIiIiICAgICAgICAgICAgICAgIHRyYW5zZmVyU3RhZ2UgPSBUcmFuc2ZlclN0YWdlLldBSVRfRklOSVNIX0FDSzsKICAgICAgICAgICAgICAgIGVucXVldWVPdGFCYXRjaCgKICAgICAgICAgICAgICAgICAgICAgICAgQ29sbGVjdGlvbnMuc2luZ2xldG9uTGlzdChidWlsZE9mZmljaWFsNTYxMFJlcXVlc3QoMHgwRSwgMSwgMCwgMCwgbmV3IGJ5dGVbMF0pKSwKICAgICAgICAgICAgICAgICAgICAgICAgKCkgLT4gYXBwZW5kKCJGaW5hbGl6YcOnw6NvIDB4MEUgZW52aWFkYS4gTyBIcnlGaW5lIGRlY2xhcmEgT1RBRmluaXNoIGltZWRpYXRhbWVudGUgZSBvIE9yYmlzIGFndWFyZGEgYXBlbmFzIHJlYm9vdC9kZXNjb25leMOjby4iKSk7IiIiCmlmIG9sZF9maW5pc2ggbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJmaW5pc2ggYW5jaG9yIG5vdCBmb3VuZCIpCnRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkX2ZpbmlzaCwgbmV3X2ZpbmlzaCwgMSkKCnRleHQgPSB0ZXh0LnJlcGxhY2UoIk9SQklTIEcyOCBMQUIg4oCUIFJFU0dBVEUgdjEuNiIsICJPUkJJUyBHMjggTEFCIOKAlCBSRVNHQVRFIHYxLjciKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJSRVNHQVRFIHYxLjYiLCAiUkVTR0FURSB2MS43IikKdGV4dCA9IHRleHQucmVwbGFjZSgidGVtcG9yaXphZG8gdjEuNSIsICJ0ZW1wb3JpemFkbyB2MS43IikKdGV4dCA9IHRleHQucmVwbGFjZSgKICAgICJDT1JSRcOHw4NPIHYxLjY6IGphbmVsYSBjaGVja3N1bSBmaXhhIGRlIDEwIHNsb3RzICg4MCBieXRlcyBlbSBwYXJpZGFkZSksIE1UVS0xNCBlIFdSSVRFX05SIHNlcmlhbC4iLAogICAgIkNPUlJFw4fDg08gdjEuNzogc2Vtw6JudGljYSBvZmljaWFsIGRvIGNhbGxiYWNrIDRLOyBzdGF0dXMgcmF3IDB4MDcgbsOjbyBpbnRlcnJvbXBlIGEgZmlsYSBENS8weDBBLiIKKQpqYXZhLndyaXRlX3RleHQodGV4dCwgZW5jb2Rpbmc9InV0Zi04IikKCm0gPSBtYWluLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQptID0gbS5yZXBsYWNlKCJ2MS42IOKAlCByZXNnYXRlIGNvbSBqYW5lbGEgY2hlY2tzdW0gb2ZpY2lhbCBkZSAxMCBzbG90cyIsCiAgICAgICAgICAgICAgInYxLjcg4oCUIHJlc2dhdGUgY29tIGNhbGxiYWNrIDRLIGlkw6pudGljbyBhbyBIcnlGaW5lIikKbWFpbi53cml0ZV90ZXh0KG0sIGVuY29kaW5nPSJ1dGYtOCIpCgpnID0gZ3JhZGxlLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQpnID0gZy5yZXBsYWNlKCJ2ZXJzaW9uQ29kZSAxNjAiLCAidmVyc2lvbkNvZGUgMTcwIikKZyA9IGcucmVwbGFjZSgidmVyc2lvbk5hbWUgJzEuNi1maXhlZC1jaGVja3N1bS13aW5kb3cnIiwKICAgICAgICAgICAgICAidmVyc2lvbk5hbWUgJzEuNy1vZmZpY2lhbC00ay1jYWxsYmFjayciKQpncmFkbGUud3JpdGVfdGV4dChnLCBlbmNvZGluZz0idXRmLTgiKQo="
+        run: |
+          set -euo pipefail
+          printf '%s' "$PATCH_B64" | base64 -d > /tmp/v17_patch.py
+          python3 /tmp/v17_patch.py
+
+      - name: Validate official callback routing
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28V17App"
+          JAVA="$APP/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java"
+          MAIN="$APP/app/src/main/java/com/orbisg28siliconcensus/MainActivity.java"
+          grep -q "ORBIS G28 LAB — RESGATE v1.7" "$JAVA"
+          grep -q "boolean official4kCallback = command == 0x02" "$JAVA"
+          grep -q "status == 1 || official4kCallback" "$JAVA"
+          grep -q "SEMÂNTICA OFICIAL: D6/0x02 curto" "$JAVA"
+          grep -q "CALLBACK 4K part=" "$JAVA"
+          grep -q "HryFine declara OTAFinish imediatamente" "$JAVA"
+          grep -q "versionCode 170" "$APP/app/build.gradle"
+          grep -q "versionName '1.7-official-4k-callback'" "$APP/app/build.gradle"
+          grep -q "callback 4K idêntico ao HryFine" "$MAIN"
+          echo "Orbis G28 Lab v1.7 official callback validation passed"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android/OrbisG28V17App clean assembleDebug --stacktrace
+
+      - name: Package outputs
+        run: |
+          set -euo pipefail
+          APP="android/OrbisG28V17App"
+          mkdir -p dist/source
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.7.apk
+          cp -R "$APP"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -qr ../Orbis-G28-Lab-v1.7-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.7.apk | tee dist/Orbis-G28-Lab-v1.7.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.7
+          path: |
+            dist/Orbis-G28-Lab-v1.7.apk
+            dist/Orbis-G28-Lab-v1.7.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.7-source
+          path: dist/Orbis-G28-Lab-v1.7-source.zip
+          if-no-files-found: error
+          retention-days: 30
