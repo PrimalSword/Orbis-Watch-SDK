@@ -6,6 +6,10 @@ on:
     branches: ["hryfine-389-extract-5610-methods"]
     paths:
       - ".github/workflows/extract-hryfine-389-5610.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/extract-hryfine-389-5610.yml"
 
 permissions:
   contents: read
@@ -69,7 +73,7 @@ jobs:
           grep -nE 'funbinFile|sendFileByteListNext|sendTen4kByteNext|on4kCheckRst|on40kCheckRst|onPartTotalCheckRst|generalSendBytes|check|sum|total|0x0A|case 10' \
             out/Cus5610OTAUtils.java out/Cus5610OTANotifyWriteUtils.java out/Cus5610CommandUtils.java \
             > out/relevant-lines.txt || true
-          sed -n '1,260p' out/Cus5610OTAUtils.java > out/Cus5610OTAUtils-head.txt
+          sed -n '1,320p' out/Cus5610OTAUtils.java > out/Cus5610OTAUtils-head.txt
           zip -j out/HryFine-5610-extracted.zip out/*.java out/*.txt
 
       - name: Upload extracted methods
