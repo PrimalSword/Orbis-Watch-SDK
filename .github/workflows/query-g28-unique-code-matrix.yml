@@ -1,0 +1,141 @@
+name: Query G28 unique-code hypothesis matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["g28-unique-code-hypothesis-matrix"]
+    paths:
+      - ".github/workflows/query-g28-unique-code-matrix.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/query-g28-unique-code-matrix.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  query-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore decompiled official OTA network flow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8841621836/zip" \
+            -o /tmp/hry-flow.zip
+          mkdir -p /tmp/hry-flow
+          unzip -q /tmp/hry-flow.zip -d /tmp/hry-flow
+
+      - name: Run five read-only hypotheses
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import random
+          import re
+          import subprocess
+          import tarfile
+          import time
+          from pathlib import Path
+
+          root = Path('/tmp/hry-flow')
+          candidates = list(root.rglob('DeviceOtaActivity.java'))
+          if not candidates:
+              archives = list(root.rglob('*.tar.gz')) + list(root.rglob('*.tgz'))
+              for archive_path in archives:
+                  with tarfile.open(archive_path, 'r:gz') as archive:
+                      archive.extractall('/tmp/hry-selected')
+              candidates = list(Path('/tmp/hry-selected').rglob('DeviceOtaActivity.java'))
+          if not candidates:
+              raise SystemExit('DeviceOtaActivity.java not found in verified artifact')
+
+          source = candidates[0].read_text(errors='replace')
+          matches = re.findall(r'SignUtils\.getSign\([^\n]+?"([0-9a-fA-F]{32})"\)', source)
+          if not matches:
+              raise SystemExit('official signing constant not found')
+          signing_constant = matches[0]
+
+          variants = {
+              'baseline_real':       '6800A4B00456312E3503473238',
+              'model_g27':           '6800A4B00456312E3503473237',
+              'model_g29':           '6800A4B00456312E3503473239',
+              'prefix_minus_one':    '6800A4AF0456312E3503473238',
+              'prefix_plus_one':     '6800A4B10456312E3503473238',
+          }
+
+          result = {
+              'read_only': True,
+              'ble_used': False,
+              'firmware_downloaded': False,
+              'requests': [],
+          }
+
+          for name, unique_code in variants.items():
+              params = {
+                  'appid': 'oaa648257e8',
+                  'bundle_id': '3',
+                  'lang': 'pt',
+                  'nonce': str(random.randrange(1048576) + 10000),
+                  'unique_code': unique_code,
+                  'timestamp': str(int(time.time())),
+              }
+              canonical = ''.join(
+                  f'{field}={params[field]}&'
+                  for field in sorted(params)
+                  if params[field] and params[field] != 'null'
+              ) + f'key={signing_constant}'
+              params['sign'] = hashlib.md5(canonical.encode()).hexdigest().upper()
+
+              body_path = Path(f'out/{name}.json')
+              command = [
+                  'curl', '--silent', '--show-error', '--location',
+                  '--connect-timeout', '20', '--max-time', '60', '--get',
+                  '--user-agent', 'okhttp/4.9.2',
+                  '--header', 'Accept: application/json',
+                  '--output', str(body_path),
+                  '--write-out', '%{http_code}',
+                  'https://ota.lianhezhuli.com/api/hry/get_update',
+              ]
+              for field, value in params.items():
+                  command += ['--data-urlencode', f'{field}={value}']
+              completed = subprocess.run(command, capture_output=True, text=True)
+              body_text = body_path.read_text(errors='replace') if body_path.exists() else ''
+              try:
+                  body = json.loads(body_text)
+              except Exception:
+                  body = body_text
+              entry = {
+                  'name': name,
+                  'unique_code': unique_code,
+                  'http_code': completed.stdout.strip(),
+                  'curl_exit': completed.returncode,
+                  'body': body,
+              }
+              result['requests'].append(entry)
+              print(json.dumps(entry, ensure_ascii=False))
+              time.sleep(1.5)
+
+          Path('out/summary.json').write_text(
+              json.dumps(result, indent=2, ensure_ascii=False),
+              encoding='utf-8',
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: G28-unique-code-hypothesis-matrix
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
