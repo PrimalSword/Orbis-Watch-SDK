@@ -1,0 +1,98 @@
+name: Build Orbis G28 Lab v1.9 Zero Flash Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-lab-v1-9-zero-flash-diagnostic"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v19-zero-diagnostic.yml"
+      - "android/OrbisG28V19/patch_v19.py"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/build-orbis-g28-v19-zero-diagnostic.yml"
+      - "android/OrbisG28V19/patch_v19.py"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-v19-zero:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore verified v1.8 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8841689722/zip" \
+            -o /tmp/v18-source-artifact.zip
+          mkdir -p /tmp/v18-artifact android/OrbisG28V19App
+          unzip -q /tmp/v18-source-artifact.zip -d /tmp/v18-artifact
+          test -s /tmp/v18-artifact/Orbis-G28-Lab-v1.8-source.zip
+          unzip -q /tmp/v18-artifact/Orbis-G28-Lab-v1.8-source.zip -d android/OrbisG28V19App
+          test -s android/OrbisG28V19App/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java
+
+      - name: Apply v1.9 zero-flash diagnostic patch
+        run: |
+          set -euo pipefail
+          python3 android/OrbisG28V19/patch_v19.py
+          APP=android/OrbisG28V19App
+          JAVA="$APP/app/src/main/java/com/orbisg28siliconcensus/ActiveLabActivity.java"
+          grep -q 'allOrNothingPartId = 0x09' "$JAVA"
+          grep -q 'allOrNothingFinalize = false' "$JAVA"
+          grep -q 'java.util.Arrays.fill(marker, (byte) 0x00)' "$JAVA"
+          grep -q 'ZERO-FLASH DIAGNÓSTICO PREPARADO' "$JAVA"
+          grep -q 'sum=0x00000000' "$JAVA"
+          grep -q 'padrão=ZERO finalize_0x0E=false' "$JAVA"
+          grep -q 'RESULTADO ZERO-FLASH' "$JAVA"
+          grep -q 'callback GATT WRITE_NR v1.9' "$JAVA"
+          grep -q 'versionCode 190' "$APP/app/build.gradle"
+          grep -q "versionName '1.9-zero-flash-diagnostic'" "$APP/app/build.gradle"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        run: gradle -p android/OrbisG28V19App clean assembleDebug --stacktrace
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          APP=android/OrbisG28V19App
+          mkdir -p dist/source
+          cp "$APP/app/build/outputs/apk/debug/app-debug.apk" dist/Orbis-G28-Lab-v1.9-zero-diagnostic.apk
+          cp -R "$APP"/. dist/source/
+          rm -rf dist/source/app/build dist/source/.gradle
+          (cd dist/source && zip -qr ../Orbis-G28-Lab-v1.9-zero-diagnostic-source.zip .)
+          sha256sum dist/Orbis-G28-Lab-v1.9-zero-diagnostic.apk | tee dist/Orbis-G28-Lab-v1.9-zero-diagnostic.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.9-zero-diagnostic
+          path: |
+            dist/Orbis-G28-Lab-v1.9-zero-diagnostic.apk
+            dist/Orbis-G28-Lab-v1.9-zero-diagnostic.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Lab-v1.9-zero-diagnostic-source
+          path: dist/Orbis-G28-Lab-v1.9-zero-diagnostic-source.zip
+          if-no-files-found: error
+          retention-days: 30
