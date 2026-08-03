@@ -1,0 +1,65 @@
+name: Query G28 official OTA manifest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["hryfine-389-extract-5610-methods"]
+    paths:
+      - ".github/workflows/query-g28-official-manifest.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/query-g28-official-manifest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Query exact endpoint used by HryFine
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          URL='https://ota.lianhezhuli.com/api/hry/get_update?unique_code=6800A4B00456312E3503473238'
+          echo "$URL" > out/request-url.txt
+          set +e
+          curl --location --connect-timeout 20 --max-time 60 --retry 3 --retry-all-errors \
+            --user-agent 'okhttp/4.9.2' \
+            --header 'Accept: application/json' \
+            --dump-header out/headers.txt \
+            --write-out '\nhttp_code=%{http_code}\nurl_effective=%{url_effective}\ncontent_type=%{content_type}\nsize_download=%{size_download}\n' \
+            "$URL" > out/body.bin 2> out/curl.stderr
+          RC=$?
+          set -e
+          echo "curl_exit=$RC" > out/result.txt
+          file out/body.bin | tee -a out/result.txt
+          stat -c 'body_bytes=%s' out/body.bin | tee -a out/result.txt
+          sha256sum out/body.bin | tee -a out/result.txt
+          cat out/headers.txt | tee -a out/result.txt
+          cat out/curl.stderr | tee -a out/result.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('out/body.bin')
+          b=p.read_bytes()
+          Path('out/body-preview.txt').write_text(b[:20000].decode('utf-8','replace'),encoding='utf-8')
+          try:
+              obj=json.loads(b.decode('utf-8'))
+              Path('out/body-pretty.json').write_text(json.dumps(obj,ensure_ascii=False,indent=2),encoding='utf-8')
+              print(json.dumps(obj,ensure_ascii=False,indent=2))
+          except Exception as e:
+              print('json_error=',repr(e))
+          PY
+
+      - name: Upload raw response
+        uses: actions/upload-artifact@v4
+        with:
+          name: G28-official-OTA-manifest-response
+          path: out/
+          if-no-files-found: error
+          retention-days: 30

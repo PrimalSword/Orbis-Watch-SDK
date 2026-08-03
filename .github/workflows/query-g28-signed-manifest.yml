@@ -1,0 +1,82 @@
+name: Query signed G28 official OTA manifest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["hryfine-389-extract-5610-methods"]
+    paths:
+      - ".github/workflows/query-g28-signed-manifest.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/query-g28-signed-manifest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  query-signed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate exact HryFine query and request manifest
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 - <<'PY'
+          import hashlib, json, random, time
+          from pathlib import Path
+
+          base = {
+              'appid': 'oaa648257e8',
+              'bundle_id': '3',
+              'lang': 'pt',
+              'nonce': str(random.randrange(1048576) + 10000),
+              'unique_code': '6800A4B00456312E3503473238',
+              'timestamp': str(int(time.time())),
+          }
+          canonical = ''.join(f'{k}={base[k]}&' for k in sorted(base) if base[k] and base[k] != 'null')
+          canonical += 'key=ead8ff5fe2f9385b55e6e509cf311a35'
+          digest = hashlib.md5(canonical.encode()).hexdigest()
+          Path('out/signing-input.txt').write_text(canonical, encoding='utf-8')
+          Path('out/query-base.json').write_text(json.dumps(base, indent=2), encoding='utf-8')
+          variants=[]
+          for lang in ('pt','en'):
+              for case, sign in (('lower', digest.lower()), ('upper', digest.upper())):
+                  p=dict(base)
+                  p['lang']=lang
+                  canonical2=''.join(f'{k}={p[k]}&' for k in sorted(p) if p[k] and p[k] != 'null') + 'key=ead8ff5fe2f9385b55e6e509cf311a35'
+                  d=hashlib.md5(canonical2.encode()).hexdigest()
+                  p['sign']=d.lower() if case=='lower' else d.upper()
+                  variants.append({'name':f'{lang}-{case}','params':p,'canonical':canonical2})
+          Path('out/variants.json').write_text(json.dumps(variants, indent=2), encoding='utf-8')
+          PY
+
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          variants=json.loads(Path('out/variants.json').read_text())
+          for v in variants:
+              name=v['name']
+              params=v['params']
+              cmd=['curl','--silent','--show-error','--location','--connect-timeout','20','--max-time','60','--get',
+                   '--user-agent','okhttp/4.9.2','--header','Accept: application/json',
+                   '--dump-header',f'out/{name}.headers.txt',
+                   '--output',f'out/{name}.body.json',
+                   '--write-out',f'%{{http_code}}\n%{{url_effective}}\n']
+              cmd.append('https://ota.lianhezhuli.com/api/hry/get_update')
+              for k,val in params.items():
+                  cmd += ['--data-urlencode',f'{k}={val}']
+              r=subprocess.run(cmd,capture_output=True,text=True)
+              Path(f'out/{name}.curl.txt').write_text(f'exit={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}\ncanonical={v["canonical"]}\nparams={json.dumps(params,ensure_ascii=False)}\n',encoding='utf-8')
+              print(name, r.returncode, Path(f'out/{name}.body.json').read_text(errors='replace'))
+          PY
+
+      - name: Upload signed responses
+        uses: actions/upload-artifact@v4
+        with:
+          name: G28-signed-official-OTA-manifest-responses
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
