@@ -46,23 +46,21 @@ jobs:
           import random
           import re
           import subprocess
+          import tarfile
           import time
-          import zipfile
           from pathlib import Path
 
-          nested = next(Path('/tmp/hry-flow').glob('*.zip'), None)
-          if nested:
-              with zipfile.ZipFile(nested) as archive:
-                  archive.extractall('/tmp/hry-selected')
-          else:
-              Path('/tmp/hry-selected').mkdir(exist_ok=True)
-              for item in Path('/tmp/hry-flow').iterdir():
-                  if item.is_file():
-                      (Path('/tmp/hry-selected') / item.name).write_bytes(item.read_bytes())
-
-          candidates = list(Path('/tmp/hry-selected').rglob('DeviceOtaActivity.java'))
+          root = Path('/tmp/hry-flow')
+          candidates = list(root.rglob('DeviceOtaActivity.java'))
+          if not candidates:
+              archives = list(root.rglob('*.tar.gz')) + list(root.rglob('*.tgz'))
+              for archive_path in archives:
+                  with tarfile.open(archive_path, 'r:gz') as archive:
+                      archive.extractall('/tmp/hry-selected')
+              candidates = list(Path('/tmp/hry-selected').rglob('DeviceOtaActivity.java'))
           if not candidates:
               raise SystemExit('DeviceOtaActivity.java not found in verified artifact')
+
           source = candidates[0].read_text(errors='replace')
           matches = re.findall(r'SignUtils\.getSign\([^\n]+?"([0-9a-fA-F]{32})"\)', source)
           if not matches:
