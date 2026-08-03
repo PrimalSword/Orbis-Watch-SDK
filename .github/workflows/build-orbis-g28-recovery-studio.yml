@@ -1,4 +1,4 @@
-name: Build Orbis G28 Recovery Studio
+name: Validate Orbis G28 Recovery Studio source
 
 on:
   workflow_dispatch:
@@ -19,46 +19,32 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-and-package-source:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
-      - run: pytest -q tests/test_recovery_studio_protocol.py
-      - run: python -m py_compile windows/orbis_g28_recovery_studio/*.py
-
-  build-windows:
-    runs-on: windows-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install build requirements
-        shell: pwsh
-        run: python -m pip install -r windows/orbis_g28_recovery_studio/requirements.txt
-      - name: Build executable
-        shell: pwsh
+      - name: Install test requirements
+        run: python -m pip install pytest
+      - name: Run protocol tests
+        run: pytest -q tests/test_recovery_studio_protocol.py
+      - name: Compile-check source
+        run: python -m py_compile windows/orbis_g28_recovery_studio/*.py
+      - name: Verify no executable packager is present
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed `
-            --name Orbis-G28-Recovery-Studio-v0.1 `
-            --collect-all bleak `
-            --paths windows/orbis_g28_recovery_studio `
-            windows/orbis_g28_recovery_studio/app.py
-      - name: Package source and checksums
-        shell: pwsh
+          ! grep -RinE 'pyinstaller|cx_Freeze|nuitka|auto-py-to-exe' windows/orbis_g28_recovery_studio .github/workflows/build-orbis-g28-recovery-studio.yml
+      - name: Package readable source only
         run: |
-          New-Item -ItemType Directory -Force -Path dist-package | Out-Null
-          Copy-Item dist/Orbis-G28-Recovery-Studio-v0.1.exe dist-package/
-          Compress-Archive -Path windows/orbis_g28_recovery_studio/* -DestinationPath dist-package/Orbis-G28-Recovery-Studio-v0.1-source.zip
-          (Get-FileHash dist-package/Orbis-G28-Recovery-Studio-v0.1.exe -Algorithm SHA256).Hash.ToLower() | Out-File -Encoding ascii dist-package/Orbis-G28-Recovery-Studio-v0.1.exe.sha256
+          mkdir -p dist-package/source
+          cp -R windows/orbis_g28_recovery_studio/. dist-package/source/
+          printf 'This artifact contains readable Python source only. No EXE, DLL, installer, obfuscator, or executable packager is included.\n' > dist-package/SECURITY-NOTICE.txt
+          (cd dist-package/source && zip -qr ../Orbis-G28-Recovery-Studio-v0.1-source-only.zip .)
+          sha256sum dist-package/Orbis-G28-Recovery-Studio-v0.1-source-only.zip > dist-package/Orbis-G28-Recovery-Studio-v0.1-source-only.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: Orbis-G28-Recovery-Studio-v0.1-Windows
+          name: Orbis-G28-Recovery-Studio-v0.1-source-only
           path: dist-package/*
           if-no-files-found: error
           retention-days: 30
