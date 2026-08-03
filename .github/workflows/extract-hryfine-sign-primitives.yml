@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download and decompile
+      - name: Download and decompile exact HryFine utilities
         run: |
           set -euo pipefail
           mkdir -p work out
@@ -33,14 +33,15 @@ jobs:
           set +e
           work/jadx/bin/jadx --show-bad-code --deobf --threads-count 4 -d work/decompiled work/classes6.dex >out/jadx.log 2>&1
           set -e
-          SRC=work/decompiled/sources
-          find "$SRC" -type f \( -name 'StringUtils.java' -o -name 'PhoneDeviceUtil.java' \) -print -exec cp {} out/ \;
-          grep -RInE 'getRandomNum\(|md5Encode32\(|getSystemLanguage\(' out/*.java > out/relevant.txt || true
-          test -s out/StringUtils.java
-          test -s out/PhoneDeviceUtil.java
+          SRC=work/decompiled/sources/com/lianhezhuli/hyfit
+          test -s "$SRC/utils/StringUtils.java"
+          test -s "$SRC/utils/PhoneDeviceUtil.java"
+          cp "$SRC/utils/StringUtils.java" out/HryFineStringUtils.java
+          cp "$SRC/utils/PhoneDeviceUtil.java" out/HryFinePhoneDeviceUtil.java
+          grep -nE 'getRandomNum\(|md5Encode32\(|getSystemLanguage\(' out/HryFineStringUtils.java out/HryFinePhoneDeviceUtil.java > out/relevant.txt || true
       - uses: actions/upload-artifact@v4
         with:
-          name: HryFine-signing-primitives
+          name: HryFine-signing-primitives-exact
           path: out/
           if-no-files-found: error
           retention-days: 30
