@@ -1,0 +1,85 @@
+name: Build Orbis G28 Android BLE Bridge v2.0
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["orbis-g28-recovery-android-v20"]
+    paths:
+      - "android/OrbisG28BridgeV20/**"
+      - ".github/workflows/build-orbis-g28-bridge-v20.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "android/OrbisG28BridgeV20/**"
+      - ".github/workflows/build-orbis-g28-bridge-v20.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore verified v1.9 Android source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8842355287/zip" \
+            -o /tmp/v19-artifact.zip
+          mkdir -p /tmp/v19-artifact android/OrbisG28Bridge
+          unzip -q /tmp/v19-artifact.zip -d /tmp/v19-artifact
+          unzip -q /tmp/v19-artifact/Orbis-G28-Lab-v1.9-zero-diagnostic-source.zip -d android/OrbisG28Bridge
+
+      - name: Apply bridge-only patch
+        run: |
+          set -euo pipefail
+          python3 android/OrbisG28BridgeV20/patch_bridge_v20.py
+          test -f android/OrbisG28Bridge/app/src/main/java/com/orbisg28bridge/BridgeActivity.java
+          test "$(find android/OrbisG28Bridge/app/src/main/java -type f | wc -l)" -eq 1
+          ! grep -R "allOrNothing\|OTA_SECRET\|HttpURLConnection\|D5/0x03\|0x0E" android/OrbisG28Bridge/app/src/main/java
+          grep -q 'case "handshake"' android/OrbisG28Bridge/app/src/main/java/com/orbisg28bridge/BridgeActivity.java
+          grep -q 'case "identity"' android/OrbisG28Bridge/app/src/main/java/com/orbisg28bridge/BridgeActivity.java
+          grep -q 'command != 0x0F && command != 0x01' android/OrbisG28Bridge/app/src/main/java/com/orbisg28bridge/BridgeActivity.java
+          python3 -m py_compile pc/orbis_g28_bridge/orbis_g28_pc.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        run: gradle -p android/OrbisG28Bridge clean assembleDebug --stacktrace
+
+      - name: Package APK, PC controller and checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist/pc
+          cp android/OrbisG28Bridge/app/build/outputs/apk/debug/app-debug.apk dist/Orbis-G28-BLE-Bridge-v2.0.apk
+          cp -R pc/orbis_g28_bridge/. dist/pc/
+          (cd dist/pc && zip -qr ../Orbis-G28-PC-Controller-v2.0.zip .)
+          sha256sum dist/Orbis-G28-BLE-Bridge-v2.0.apk | tee dist/Orbis-G28-BLE-Bridge-v2.0.apk.sha256
+          sha256sum dist/Orbis-G28-PC-Controller-v2.0.zip | tee dist/Orbis-G28-PC-Controller-v2.0.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbis-G28-Android-BLE-Bridge-v2.0
+          path: |
+            dist/Orbis-G28-BLE-Bridge-v2.0.apk
+            dist/Orbis-G28-BLE-Bridge-v2.0.apk.sha256
+            dist/Orbis-G28-PC-Controller-v2.0.zip
+            dist/Orbis-G28-PC-Controller-v2.0.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
